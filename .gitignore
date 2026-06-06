@@ -1,0 +1,54 @@
+# ==============================================================================
+# Firefly - Drone of War .gitignore
+# ==============================================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# Sanal ortam
+venv/
+.venv/
+env/
+.env/
+
+# --- IDE / Editör ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# --- İşletim Sistemi ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+.Trash-*
+
+# --- Unreal Engine Simülatör ---
+# Büyük oyun dosyalarını repo'ya dahil etme
+Drones of War Teknofest/
+
+# --- Log ve Geçici Dosyalar ---
+*.log
+*.tmp
+*.bak
+*.cache
