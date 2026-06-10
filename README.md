@@ -164,19 +164,46 @@ Alma:     droneX,droneY,droneZ,roll,pitch,yaw,vx,vy,vz,speed,alt,tarX,tarY,tarZ,
 
 ---
 
-## 📁 Proje Yapısı
+## 📁 Proje Yapısı (Monorepo)
 
 ```
-Firefly/
-├── drone_gui.py                  # Tkinter GUI + Kamikaze AI mantığı
-├── drone_sdk.py                  # TCP iletişim SDK'sı (v2.1)
-├── Drones of War Teknofest/      # Unreal Engine simülatör dosyaları
-│   ├── DronesOfWar.exe           # Oyun çalıştırılabilir dosyası
-│   ├── DronesOfWar/              # Oyun veri dosyaları
-│   ├── Engine/                   # Unreal Engine çalışma dosyaları
-│   └── SDL2.dll                  # SDL2 kütüphanesi
-├── .gitignore
-└── README.md
+FIREFLY (Monorepo)
+├── config/                      # Ortak konfigürasyon dosyaları (.yaml)
+│   ├── pid_params.yaml          # PID katsayıları
+│   ├── ekf_params.yaml          # EKF filtre parametreleri
+│   ├── competition_server.yaml  # Yarışma sunucusu bağlantı ayarları
+│   └── crsf_config.yaml         # CRSF alıcı/verici ayarları
+├── docs/                        # Mimari şemaları ve yarışma notları
+│   ├── architecture_diagrams.md # Sistem mimarisi şemaları
+│   ├── competition_notes.md     # Yarışma notları ve kurallar
+│   └── README.md
+├── scripts/                     # Kurulum ve simülasyon/uçuş başlatma betikleri
+│   ├── setup.sh                 # Kurulum betiği
+│   ├── launch_simulation.sh     # Simülasyon başlatma betiği
+│   └── launch_real_flight.sh    # Gerçek uçuş başlatma betiği
+├── src/
+│   ├── python/                  # Python Backend Servisi
+│   │   ├── navigation/          # EKF Sensör Füzyonu & Yol Noktası Kontrolü (ekf.py, waypoint_controller.py, gnss_filter.py)
+│   │   ├── vision/              # RT-DETR Nesne Tespiti & TCT-Track Takibi (detector.py, tracker.py, lock_detector.py)
+│   │   ├── guidance/            # PID Kontrolcüleri & CRSF Paket Üretimi (pid_yaw.py, pid_pitch.py, pid_throttle.py, crsf_sender.py, mode_manager.py)
+│   │   ├── comms/               # Sunucu İletişimi & Telemetri (server_client.py, telemetry_parser.py, data_broker.py)
+│   │   └── simulation/          # Gazebo/ROS2 Entegrasyonu & GNSS Karıştırıcı (gnss_jammer.py, sim_bridge.py, scenario_runner.py)
+│   └── gcs/                     # Node.js/Electron Yer Kontrol İstasyonu (Ground Control Station)
+│       ├── main.js              # Electron Ana Süreci
+│       ├── preload.js           # Electron Önyükleme Süreci
+│       ├── index.js             # Python servisi için socket.io sunucu köprüsü
+│       ├── renderer/            # React UI Bileşenleri (MapView, VideoOverlay, LockIndicator, TelemetryPanel, StatusBar, ServerStatus)
+│       └── assets/              # İkonlar ve Stiller (styles.css)
+├── tests/                       # Tüm modüllerin birim testleri
+│   ├── python/                  # Python birim testleri
+│   └── gcs/                     # Yer Kontrol İstasyonu testleri
+├── .env.example                 # Örnek çevre değişkenleri
+├── .gitignore                   # Git yoksayma dosyası
+├── package.json                 # GCS ve Node.js bağımlılıkları
+├── requirements.txt             # Python backend bağımlılıkları
+├── drone_gui.py                 # (Eski) Tkinter GUI & Kamikaze AI
+├── drone_sdk.py                 # (Eski) TCP İletişim SDK'sı
+└── README.md                    # Bu doküman
 ```
 
 ---
@@ -184,3 +211,4 @@ Firefly/
 ## 📄 Lisans
 
 Bu proje Teknofest "Drone of War" yarışması kapsamında geliştirilmiştir.
+

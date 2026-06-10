@@ -1,0 +1,30 @@
+// Socket.io Server & Backend Bridge
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+  }
+});
+
+io.on('connection', (socket) => {
+  console.log('Client connected to GCS Backend Bridge');
+  
+  socket.on('telemetry', (data) => {
+    // Forward to React Renderer
+    io.emit('telemetry_update', data);
+  });
+  
+  socket.on('disconnect', () => {
+    console.log('Client disconnected');
+  });
+});
+
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`GCS Bridge Server running on port ${PORT}`);
+});

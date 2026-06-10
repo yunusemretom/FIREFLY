@@ -1,0 +1,6 @@
+# Competition Server Configuration
+server:
+  host: "127.0.0.1"
+  port: 8000
+  team_id: "FIREFLY_TEAM_01"
+  update_interval_ms: 100

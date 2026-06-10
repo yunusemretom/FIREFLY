@@ -1,0 +1,7 @@
+/* GCS CSS styling tokens */
+body {
+  margin: 0;
+  font-family: 'Outfit', 'Inter', sans-serif;
+  background-color: #121212;
+  color: #e0e0e0;
+}

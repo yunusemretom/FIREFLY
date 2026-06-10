@@ -1,0 +1,16 @@
+# PID Controller Parameters for FIREFLY FPV Drone
+
+pid_yaw:
+  kp: 0.07
+  ki: 0.00
+  kd: 0.01
+
+pid_pitch:
+  kp: 0.035
+  ki: 0.00
+  kd: 0.005
+
+pid_throttle:
+  kp: 0.01
+  ki: 0.00
+  kd: 0.002

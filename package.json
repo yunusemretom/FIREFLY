@@ -1,0 +1,19 @@
+{
+  "name": "firefly-monorepo",
+  "version": "1.0.0",
+  "description": "Autonomous FPV Drone Interception System",
+  "main": "src/gcs/main.js",
+  "scripts": {
+    "start": "electron .",
+    "gcs-bridge": "node src/gcs/index.js",
+    "test": "echo \"Error: no test specified\" && exit 0"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1",
+    "socket.io-client": "^4.6.1"
+  },
+  "devDependencies": {
+    "electron": "^24.1.2"
+  }
+}

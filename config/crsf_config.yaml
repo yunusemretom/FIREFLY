@@ -1,0 +1,5 @@
+# CRSF Telemetry/Control Protocol Configuration
+crsf:
+  serial_port: "/dev/ttyAMA0"
+  baudrate: 420000
+  channels_count: 16
