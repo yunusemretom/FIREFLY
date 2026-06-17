@@ -4,6 +4,10 @@ import drone_sdk as drone
 import threading
 import time
 import math
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "python", "navigation"))
+from nav_integration import NavigationSystem
+
 
 class DroneGUI:
     def __init__(self, root):
@@ -12,10 +16,10 @@ class DroneGUI:
         self.root.geometry("500x850")
         self.root.configure(bg="#0A0A0A")
         
-        # Kamikaze State Management
         self.kamikaze_state = "ATTACK" 
+
+        self.nav = NavigationSystem(corrupt_for_test=False, intercept_time=0.0)
         
-        # Style configuration
         self.style = ttk.Style()
         self.style.theme_use('clam')
         self.style.configure("TFrame", background="#0A0A0A")
@@ -25,7 +29,6 @@ class DroneGUI:
         
         self.create_widgets()
         
-        # Connection Status
         self.status_var = tk.StringVar(value="DISCONNECTED")
         self.status_label = tk.Label(root, textvariable=self.status_var, bg="#0A0A0A", fg="#FF3131", font=("Segoe UI", 12, "bold"))
         self.status_label.pack(pady=15)
@@ -36,13 +39,11 @@ class DroneGUI:
                                    font=("Segoe UI", 10, "bold"), bd=1, highlightbackground="#00FF41")
         self.connect_btn.pack(pady=5)
 
-        # Update Loop
         self.running = True
         self.update_thread = threading.Thread(target=self.control_loop, daemon=True)
         self.update_thread.start()
 
     def create_widgets(self):
-        # --- Telemetry Section ---
         header_frame = tk.Frame(self.root, bg="#0A0A0A")
         header_frame.pack(fill=tk.X, padx=30, pady=(20, 5))
         tk.Label(header_frame, text="SYSTEM TELEMETRY", bg="#0A0A0A", fg="#00FF41", font=("Segoe UI", 14, "bold")).pack(side=tk.LEFT)
@@ -66,7 +67,6 @@ class DroneGUI:
             tk.Label(telemetry_frame, textvariable=var, bg="#111111", fg="#FFFFFF", font=("Consolas", 10)).grid(row=i, column=1, sticky="w", padx=15, pady=4)
             self.telemetry_labels[label] = var
 
-        # --- Controls Section ---
         tk.Label(self.root, text="COMMAND INTERFACE", bg="#0A0A0A", fg="#00FF41", font=("Segoe UI", 14, "bold")).pack(fill=tk.X, padx=30, pady=(25, 10))
 
         # Autonomous Mode Switch
@@ -77,7 +77,6 @@ class DroneGUI:
                                         font=("Segoe UI", 11, "bold"), pady=5)
         self.auto_check.pack()
 
-        # Max Throttle Limit Adjustment
         max_thr_frame = tk.Frame(self.root, bg="#0A0A0A")
         max_thr_frame.pack(fill=tk.X, padx=30, pady=5)
         tk.Label(max_thr_frame, text="MAX THROTTLE (%):", bg="#0A0A0A", fg="#00FF41", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
@@ -87,11 +86,9 @@ class DroneGUI:
         self.max_throttle_slider.set(1.0) # Default 100%
         self.max_throttle_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
 
-        # Sliders Frame
         self.sliders_container = tk.Frame(self.root, bg="#0A0A0A")
         self.sliders_container.pack(fill=tk.BOTH, expand=True, padx=30)
 
-        # Throttle
         thr_frame = tk.Frame(self.sliders_container, bg="#0A0A0A")
         thr_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20))
         tk.Label(thr_frame, text="THR", bg="#0A0A0A", fg="#00FF41", font=("Segoe UI", 9, "bold")).pack()
@@ -101,7 +98,6 @@ class DroneGUI:
         self.throttle_slider.set(0.0)
         self.throttle_slider.pack()
 
-        # Other axes
         axes_frame = tk.Frame(self.sliders_container, bg="#0A0A0A")
         axes_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -116,7 +112,6 @@ class DroneGUI:
             s.pack(side=tk.LEFT, fill=tk.X, expand=True)
             setattr(self, f"{axis.lower()}_slider", s)
 
-        # Arm Switch
         self.arm_var = tk.IntVar(value=0)
         self.arm_check = tk.Checkbutton(self.root, text="ARM WEAPON SYSTEM", variable=self.arm_var, 
                                         bg="#0A0A0A", fg="#FF3131", selectcolor="#000000", 
@@ -125,7 +120,6 @@ class DroneGUI:
         self.arm_check.pack()
 
     def update_thr_slider_range(self, val):
-        """Max Throttle slider'ı değiştikçe ana THR slider'ının üst limitini günceller."""
         new_max = float(val)
         current_val = self.throttle_slider.get()
         self.throttle_slider.configure(from_=new_max)
@@ -145,106 +139,86 @@ class DroneGUI:
             self.connect_btn.config(text="INITIALIZE LINK", bg="#1A1A1A")
 
     def control_loop(self):
-        # PID Constants - Daha hassas ve akıllı takip için optimize edildi
-        KP_YAW = 0.07 # Maksimum yönelme hassasiyeti
+      
+        KP_YAW = 0.01  #yawda sallantı var
         KP_PITCH = 0.035
         KP_THR = 0.01
         
         BASE_HOVER_THR = 0.58 
 
+        last_tar_speed = 0.0
+
         while self.running:
             if drone.is_connected():
                 if self.auto_mode_var.get():
-                    # --- INTELLIGENT KAMIKAZE SYSTEM (v2.6) ---
                     t = drone.get_telemetry()
-                    d_pos = t["drone"]["position"]
                     d_rot = t["drone"]["rotation"]
                     d_speed = t["drone"]["speed"]
-                    tar_pos = t["target"]["position"]
-                    # Kullanıcı isteği: Hedef hızı sabit 1500 cm/s olarak kabul et
-                    tar_speed = 1500.0 
-                    
-                    dx = tar_pos[0] - d_pos[0]
-                    dy = tar_pos[1] - d_pos[1]
-                    dz = tar_pos[2] - d_pos[2]
-                    dist_3d = math.sqrt(dx**2 + dy**2 + dz**2)
-                    dist_2d = math.sqrt(dx**2 + dy**2)
+
+                    nav_out = self.nav.process(t)
+                    dx = nav_out["dx"]
+                    dy = nav_out["dy"]
+                    dz = nav_out["dz"]
+                    dist_3d = nav_out["dist_3d"]
+                    dist_2d = nav_out["dist_2d"]
+                    tar_speed = nav_out["target_speed"]   
+                    last_tar_speed = tar_speed
                     
                     self.status_var.set("TARGET LOCKED - ATTACKING")
                     self.status_label.config(fg="#00FF41")
 
-                    # 2. Akıllı Mesafe Ölçekleme (Proximity Scaling)
-                    # 60 metreden itibaren strateji başlar
+                    # 60 metreden itibaren strateji başlamakta
                     proximity_scale = min(1.0, dist_3d / 6000.0)
                     
-                    # 3. Görüşü Ortalama ve Dinamik Dalış Profili
-                    # YAW: Yatayda hedefe kilitlen
+                    # YAW: Yatayda hedefe kilitlenme kısmı
                     target_yaw = math.degrees(math.atan2(dy, dx))
                     yaw_error = target_yaw - d_rot[2]
                     while yaw_error > 180: yaw_error -= 360
                     while yaw_error < -180: yaw_error += 360
                     final_yaw = yaw_error * KP_YAW
                     
-                    # PITCH & THROTTLE STRATEJİSİ (Pürüzsüz Yaklaşım)
                     CAMERA_TILT = 25.0
                     target_pitch_world = math.degrees(math.atan2(dz, dist_2d))
-                    # Hedefi kamerada ortalamak için gereken temel açı
                     lock_pitch = target_pitch_world - CAMERA_TILT
                     
-                    # --- DİNAMİK SALDIRI STRATEJİSİ (v2.9) ---
-                    # Faz geçiş mesafesi: 45 metre
+                    # Faz geçiş mesafesi: 45 metre verildi
                     PHASE2_START = 4500.0
                     max_allowed_thr = self.max_throttle_slider.get()
                     
-                    # Pitch Dalış Ofseti: Dronun ileri gitmesi için burnunu eğmesi gerek
-                    # Daha agresif bir açı (-25 derece) veriyoruz ki hedefe yetişebilsin
+                    #  (-25 derece) verdim ki hedefe yetişebilsin
                     DIVE_OFFSET = -25.0 
 
                     # Hedefi yakalamak için gereken tahmini gaz (Match Speed)
-                    # tar_speed (1500) — Talon hedefi yakalayabilsin diye daha agresif taban
                     match_target_thr = (BASE_HOVER_THR * 0.92) + (tar_speed / 3800.0)
                     
-                    # --- İRTİFA EŞİTLEME (Altitude Matching) ---
                     alt_correction = dz * 0.0015 
                     match_target_thr += alt_correction
 
                     if dist_3d > PHASE2_START:
-                        # --- FAZ 1: YAKALAMA MODU ---
-                        # Burnunu iyice eğerek (DIVE_OFFSET) maksimum ileri hız kazan
                         target_pitch_drone = lock_pitch + DIVE_OFFSET
                         
                         final_thr = min(match_target_thr + 0.24, max_allowed_thr)
                     else:
-                        # --- FAZ 2: HASSAS YAKLAŞIM MODU ---
-                        # local_scale: PHASE2_START -> 1.0, 0m -> 0.0
                         local_scale = max(0.0, dist_3d / PHASE2_START)
                         
-                        # Pitch Kontrolü: 45 metreden vuruş anına kadar burnu kademeli düzelt
-                        # local_scale 1.0 iken DIVE_OFFSET tam uygulanır, 0.0 iken lock_pitch'e döner
-                        # Flare (burnu kaldırma) sadece son 10 metrede devreye girsin
-                        flare_trigger_scale = min(1.0, dist_3d / 1000.0) # 10m altında 0.0'a yaklaşır
-                        flare_effect = (1.0 - flare_trigger_scale) * 15.0 # Son 10m'de burnu kaldır
+                        flare_trigger_scale = min(1.0, dist_3d / 1000.0)
+                        flare_effect = (1.0 - flare_trigger_scale) * 15.0 
                         
                         target_pitch_drone = lock_pitch + (DIVE_OFFSET * local_scale) + flare_effect
                         
-                        # Gaz Hesabı
                         approach_buffer = 0.22 * local_scale
                         final_thr = match_target_thr + approach_buffer
 
-                    # Geride kalınıyorsa gazı artır (telemetrideki anlık hız)
                     speed_gap = max(0.0, tar_speed - d_speed)
                     final_thr += min(0.42, speed_gap / 3200.0)
 
-                    # Hız Sınırı Koruması
                     final_thr = min(max_allowed_thr, final_thr)
                     
                     pitch_error = target_pitch_drone - d_rot[1]
                     final_pitch = pitch_error * KP_PITCH
                     
-                    # 4. Roll (Stabilizasyon)
-                    final_roll = -d_rot[0] * 0.25
+                    final_roll = -d_rot[0] * 0.5
                     
-                    # Komutları gönder (ayrı set_* — oyun tarafındaki önceki davranışa uyum)
                     fy = max(-1.0, min(1.0, final_yaw))
                     fp = max(-1.0, min(1.0, final_pitch))
                     fr = max(-1.0, min(1.0, final_roll))
@@ -254,7 +228,6 @@ class DroneGUI:
                     drone.set_roll(fr)
                     drone.set_arm(True)
                     
-                    # UI update
                     self.yaw_slider.set(fy)
                     self.pitch_slider.set(fp)
                     self.throttle_slider.set(max(-0.8, min(self.max_throttle_slider.get(), final_thr)))
@@ -265,7 +238,6 @@ class DroneGUI:
                         self.status_var.set("LINK ESTABLISHED")
                         self.status_label.config(fg="#00FF41")
                     
-                    # --- MANUAL CONTROL ---
                     drone.set_control_surfaces(
                         self.throttle_slider.get(),
                         self.pitch_slider.get(),
@@ -274,7 +246,6 @@ class DroneGUI:
                         bool(self.arm_var.get()),
                     )
                 
-                # Update Telemetry UI
                 t = drone.get_telemetry()
                 d = t["drone"]
                 tar = t["target"]
@@ -284,7 +255,10 @@ class DroneGUI:
                 self.telemetry_labels["DRONE SPEED"].set(f"{d['speed']:.2f} cm/s")
                 self.telemetry_labels["ALTITUDE"].set(f"{d['altitude']:.2f} cm")
                 self.telemetry_labels["TARGET POS"].set(f"{tar['position'][0]:.1f}, {tar['position'][1]:.1f}, {tar['position'][2]:.1f}")
-                self.telemetry_labels["TARGET SPEED"].set("1500.00 cm/s")
+                if self.auto_mode_var.get():
+                    self.telemetry_labels["TARGET SPEED"].set(f"{last_tar_speed:.2f} cm/s (EKF)")
+                else:
+                    self.telemetry_labels["TARGET SPEED"].set(f"{tar.get('speed', 0.0):.2f} cm/s")
             
             time.sleep(0.05)
 

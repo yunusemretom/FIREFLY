@@ -3,3 +3,21 @@ ekf_noise:
   process_noise_covariance_q: 0.01
   measurement_noise_covariance_r: 0.1
   initial_state_covariance_p: 1.0
+
+ekf:
+  dt: 0.05           
+  q_pos: 50.0        
+  q_vel: 8000.0       
+  r_pos: 900.0        
+  chi2_threshold: 60.0  
+
+gnss_corruptor:
+  enabled: true       # !!! Gerçek uçuşta false yapılacak bura- sim ekfsi için bu bozuk değer gelicek
+  noise_std: 20.0
+  jump_prob: 0.03
+  jump_magnitude: 3000.0
+  dropout_prob: 0.08
+
+waypoint:
+  intercept_time: 0.3   
+  camera_tilt: 25.0
