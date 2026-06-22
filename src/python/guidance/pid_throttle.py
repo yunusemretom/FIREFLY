@@ -1,3 +1,8 @@
+"""
+PID controller for drone throttle/altitude.
+"""
+
+# pid_throttle.py
 import math
 from .pid_core import PID, clamp
 
@@ -16,6 +21,7 @@ class ThrottleController:
         dz_meters = clamp(dz / 100.0, -5.0, 5.0)
         alt_correction = self.alt_pid.calculate(dz_meters, dt)
         
+        # O meşhur mükemmel geometrik denklemimiz!
         current_pitch_rad = math.radians(clamp(abs(current_pitch), 0.0, 60.0))
         target_throttle = (self.base_throttle + alt_correction) / max(0.5, math.cos(current_pitch_rad))
         

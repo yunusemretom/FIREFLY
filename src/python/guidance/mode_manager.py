@@ -1,3 +1,7 @@
+"""
+Flight mode manager for switching between Manuel, Autonomous (Kamikaze), and FailSafe modes.
+"""
+# mode_manager.py
 class ModeManager:
     def __init__(self, config):
         self.state = "KALKIS"

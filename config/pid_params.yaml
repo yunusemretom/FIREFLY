@@ -9,7 +9,7 @@ flight:
 limits:
   min_pitch: -60.0
   max_pitch: 20.0
-  min_throttle: 0.20
+  min_throttle: 0.45
   max_throttle: 1.0
 
 thresholds:
@@ -28,7 +28,7 @@ inner_pid:
   yaw: {kp: 0.035, ki: 0.0, kd: 0.005}
 
 outer_pid:
-  altitude: {kp: 0.15, ki: 0.05, kd: 0.02, clamp_min: -0.45, clamp_max: 0.40, int_limit: 10.0}
+  altitude: {kp: 0.08, ki: 0.02, kd: 0.01, clamp_min: -0.25, clamp_max: 0.40, int_limit: 5.0}
   speed: {kp: 2.5, ki: 0.5, kd: 0.1, clamp_min: -45.0, clamp_max: 45.0, int_limit: 20.0}
 
 slew:
