@@ -2,6 +2,7 @@
 Client for connecting to the competition server.
 """
 
+
 class CompetitionServerClient:
     def __init__(self, host="localhost", port=8000):
         pass

@@ -2,6 +2,7 @@
 Waypoint controller for FPV drone interception path planning.
 """
 
+
 class WaypointController:
     def __init__(self):
         pass

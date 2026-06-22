@@ -2,6 +2,7 @@
 GNSS filter for smoothing and rejecting outliers from corrupted GNSS data.
 """
 
+
 class GNSSFilter:
     def __init__(self):
         pass

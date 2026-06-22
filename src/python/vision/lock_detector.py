@@ -2,6 +2,7 @@
 Lock detector to verify target identification and tracking state.
 """
 
+
 class LockDetector:
     def __init__(self):
         pass

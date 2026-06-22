@@ -4,6 +4,7 @@ GNSS noise and jamming signal generator for robustness testing.
 
 import random
 
+
 class GNSSJammer:
     def __init__(self, jam_level=0.1):
         self.jam_level = jam_level
