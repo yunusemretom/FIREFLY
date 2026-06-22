@@ -9,14 +9,6 @@ import math
 import yaml
 import sys
 import os
-
-# Projenizdeki modülleri import etmek için kök dizini (FIREFLY-1) sisteme ekleyelim
-# Eğer kodları kendi klasörünüzden direkt çalıştırıyorsanız bu iki satır yolların doğru bulunmasını sağlar.
-_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
-
-# Simülasyon SDK'sını dahil et (Kendi sdk dosya adınıza göre güncelleyebilirsiniz)
 import drone_sdk as drone
 
 # Yeni ayırdığımız modülleri import ediyoruz
@@ -26,6 +18,14 @@ from src.python.guidance.pid_throttle import ThrottleController
 from src.python.guidance.pid_yaw import YawController
 from src.python.guidance.pid_core import PID, clamp
 
+# Eğer kodları kendi klasörünüzden direkt çalıştırıyorsanız bu iki satır yolların doğru bulunmasını sağlar.
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+
+
+
 def load_config():
     """YAML ayar dosyasını okur ve sözlük (dict) olarak döner."""
     with open('config/pid_params.yaml', 'r', encoding='utf-8') as f:
@@ -34,7 +34,7 @@ def load_config():
 def run_simulation():
     config = load_config()
     dt = config['flight']['dt']
-    
+
 
     # 1. Aşama: Otonom Zekayı (Modülleri) Başlat
     mode_mgr = ModeManager(config)
