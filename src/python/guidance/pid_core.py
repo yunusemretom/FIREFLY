@@ -1,9 +1,14 @@
 # pid_core.py
 class PID:
     def __init__(self, kp, ki, kd, clamp=None, integral_limit=None):
-        self.kp = kp; self.ki = ki; self.kd = kd
-        self.clamp = clamp; self.integral_limit = integral_limit
-        self.integral = 0.0; self.prev_error = 0.0; self.first_run = True
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.clamp = clamp
+        self.integral_limit = integral_limit
+        self.integral = 0.0
+        self.prev_error = 0.0
+        self.first_run = True
 
     def calculate(self, error, dt):
         if self.first_run:
@@ -36,8 +41,10 @@ class SlewLimiter:
         return self.current_val
 
 def wrap_180(angle):
-    while angle > 180: angle -= 360
-    while angle < -180: angle += 360
+    while angle > 180:
+        angle -= 360
+    while angle < -180:
+        angle += 360
     return angle
 
 def clamp(val, lo, hi):
