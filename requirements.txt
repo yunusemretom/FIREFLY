@@ -3,3 +3,4 @@ filterpy>=1.4.5
 PyYAML>=5.4.1
 python-socketio>=5.5.0
 opencv-python>=4.5.0
+websockets>=11.0

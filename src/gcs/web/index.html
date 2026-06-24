@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>FIREFLY GCS</title>
+  <meta name="description" content="Firefly Drone Yer Kontrol İstasyonu"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+
+<!-- ══════════ TOP STATUS BAR ══════════ -->
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="logo">
+      <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
+        <path d="M14 2L4 24h5l5-10 5 10h5L14 2z" fill="url(#fg)"/>
+        <defs><linearGradient id="fg" x1="14" y1="2" x2="14" y2="24" gradientUnits="userSpaceOnUse"><stop stop-color="#ff6b2b"/><stop offset="1" stop-color="#ff2b2b"/></linearGradient></defs>
+      </svg>
+      <span class="logo-text">FIREFLY <em>GCS</em></span>
+    </div>
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-page="cockpit" id="nav-cockpit">⊹ COCKPIT</button>
+      <button class="nav-tab" data-page="maps" id="nav-maps">⬡ MAPS</button>
+      <button class="nav-tab" data-page="settings" id="nav-settings">⚙ AYARLAR</button>
+      <button class="nav-tab" data-page="about" id="nav-about">◈ HAKKIMIZDA</button>
+    </nav>
+  </div>
+
+  <div class="topbar-right">
+    <!-- Mode Badge -->
+    <div class="status-chip" id="chip-mode">
+      <span class="chip-dot"></span>
+      <span class="chip-label" id="lbl-mode">MANUEL</span>
+    </div>
+    <!-- ARM / DISARM -->
+    <button class="arm-btn" id="btn-arm-main" data-armed="false">DISARM</button>
+    <!-- Battery -->
+    <div class="status-chip" id="chip-battery">
+      <span class="batt-icon" id="batt-icon">🔋</span>
+      <span class="chip-label" id="lbl-battery">---%</span>
+    </div>
+    <!-- WS Connection -->
+    <div class="ws-indicator" id="ws-indicator">
+      <span class="ws-dot" id="ws-dot"></span>
+      <span class="ws-label" id="ws-label">BAĞLANTI YOK</span>
+    </div>
+    <button class="btn-connect" id="btn-drone-connect">BAĞLAN</button>
+  </div>
+</header>
+
+<!-- ══════════ PAGES ══════════ -->
+<main class="pages">
+
+  <!-- ──── PAGE: COCKPIT ──── -->
+  <section class="page active" id="page-cockpit">
+    <div class="cockpit-layout">
+
+      <!-- Camera Feed -->
+      <div class="cam-wrapper" id="cam-wrapper">
+        <video id="cam-usb" autoplay muted playsinline style="display:none;width:100%;height:100%;object-fit:cover;"></video>
+        <img id="cam-ip" src="" alt="" style="display:none;width:100%;height:100%;object-fit:cover;"/>
+        <div class="cam-placeholder" id="cam-placeholder">
+          <div class="cam-scanlines"></div>
+          <div class="cam-grid-lines"></div>
+          <div class="cam-crosshair">
+            <div class="ch-h"></div><div class="ch-v"></div>
+            <div class="ch-ring r1"></div><div class="ch-ring r2"></div>
+          </div>
+          <div class="cam-hud-tl">
+            <span class="hud-tag">CAM·1</span>
+            <span class="hud-tag" id="cam-src-label">NO SOURCE</span>
+          </div>
+          <div class="cam-hud-tr">
+            <span class="hud-tag blink" id="cam-rec-label" style="display:none;">● REC</span>
+          </div>
+          <div class="cam-hud-bl">
+            <span class="hud-tag" id="hud-pos">POS ···</span>
+          </div>
+          <div class="cam-hud-br">
+            <span class="hud-tag" id="hud-mode">MANUAL</span>
+          </div>
+          <div class="lock-indicator hidden" id="lock-indicator">
+            <div class="lock-ring lr1"></div>
+            <div class="lock-ring lr2"></div>
+            <span class="lock-text">TARGET LOCKED</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Panel -->
+      <aside class="right-panel">
+
+        <!-- Telemetry -->
+        <div class="panel-card">
+          <div class="panel-hdr">
+            <span class="panel-title">📡 TELEMETRİ</span>
+            <span class="demo-tag" id="demo-tag">DEMO</span>
+          </div>
+          <div class="telem-grid">
+            <div class="tr"><span class="tk">DRONE POS</span><span class="tv mono" id="t-pos">···</span></div>
+            <div class="tr"><span class="tk">ROT R/P/Y</span><span class="tv mono" id="t-rot">···</span></div>
+            <div class="tr hi"><span class="tk">HIZ</span><span class="tv mono" id="t-spd">··· cm/s</span></div>
+            <div class="tr hi"><span class="tk">İRTİFA</span><span class="tv mono" id="t-alt">··· cm</span></div>
+            <div class="tr sep"></div>
+            <div class="tr"><span class="tk">HEDEF POS</span><span class="tv mono" id="t-tpos">···</span></div>
+            <div class="tr"><span class="tk">HEDEF HIZ</span><span class="tv mono accent" id="t-tspd">··· cm/s</span></div>
+            <div class="tr"><span class="tk">MESAFE</span><span class="tv mono" id="t-dist">··· m</span></div>
+          </div>
+        </div>
+
+        <!-- Flight Instruments (collapsible) -->
+        <div class="panel-card collapsible" id="instr-panel">
+          <div class="panel-hdr toggle-hdr" id="instr-toggle" role="button" tabindex="0" aria-expanded="true">
+            <span class="panel-title">✈ FLIGHT INSTRUMENTS</span>
+            <span class="arrow" id="instr-arrow">▲</span>
+          </div>
+          <div class="collapse-body" id="instr-body">
+            <div class="instruments-grid">
+              <div class="instr-card"><div class="instr-lbl">ATTITUDE</div><canvas id="c-att" width="120" height="120"></canvas></div>
+              <div class="instr-card"><div class="instr-lbl">ALTITUDE</div><canvas id="c-alt" width="120" height="120"></canvas></div>
+              <div class="instr-card"><div class="instr-lbl">AIRSPEED</div><canvas id="c-spd" width="120" height="120"></canvas></div>
+              <div class="instr-card"><div class="instr-lbl">HEADING</div><canvas id="c-hdg" width="120" height="120"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls (collapsible) -->
+        <div class="panel-card collapsible" id="ctrl-panel">
+          <div class="panel-hdr toggle-hdr" id="ctrl-toggle" role="button" tabindex="0" aria-expanded="false">
+            <span class="panel-title">🕹 KONTROLLER</span>
+            <span class="arrow" id="ctrl-arrow">▼</span>
+          </div>
+          <div class="collapse-body hidden" id="ctrl-body">
+            <!-- Kamikaze Toggle -->
+            <div class="ctrl-row">
+              <span class="ctrl-lbl">MOD</span>
+              <button class="mode-toggle-btn" id="btn-kamikaze" data-mode="manual">
+                <span id="mode-text">🎯 MANUEL</span>
+              </button>
+            </div>
+            <!-- Sliders -->
+            <div class="ctrl-sliders">
+              <div class="sl-row">
+                <span class="sl-lbl">THR</span>
+                <input type="range" class="sl" id="ctrl-thr" min="0" max="1" step="0.01" value="0"/>
+                <span class="sl-val" id="val-thr">0.00</span>
+              </div>
+              <div class="sl-row">
+                <span class="sl-lbl">PITCH</span>
+                <input type="range" class="sl" id="ctrl-pitch" min="-1" max="1" step="0.01" value="0"/>
+                <span class="sl-val" id="val-pitch">0.00</span>
+              </div>
+              <div class="sl-row">
+                <span class="sl-lbl">ROLL</span>
+                <input type="range" class="sl" id="ctrl-roll" min="-1" max="1" step="0.01" value="0"/>
+                <span class="sl-val" id="val-roll">0.00</span>
+              </div>
+              <div class="sl-row">
+                <span class="sl-lbl">YAW</span>
+                <input type="range" class="sl" id="ctrl-yaw" min="-1" max="1" step="0.01" value="0"/>
+                <span class="sl-val" id="val-yaw">0.00</span>
+              </div>
+              <div class="sl-row">
+                <span class="sl-lbl">MAX THR</span>
+                <input type="range" class="sl" id="ctrl-maxthr" min="0.1" max="1" step="0.01" value="1"/>
+                <span class="sl-val" id="val-maxthr">1.00</span>
+              </div>
+            </div>
+            <button class="btn-send-ctrl" id="btn-send-ctrl">▶ GÖNDER</button>
+          </div>
+        </div>
+
+        <!-- Mission Status -->
+        <div class="panel-card">
+          <div class="panel-hdr"><span class="panel-title">⚡ MİSYON</span></div>
+          <div class="mission-grid">
+            <div class="ms-item"><span class="ms-k">FAZ</span><span class="ms-v" id="m-phase">BEKLEME</span></div>
+            <div class="ms-item"><span class="ms-k">KİLİT</span><span class="ms-v" id="m-lock">YOK</span></div>
+            <div class="ms-item"><span class="ms-k">YAKLAŞIM</span><span class="ms-v" id="m-appr">---</span></div>
+          </div>
+        </div>
+
+      </aside>
+    </div>
+  </section>
+
+  <!-- ──── PAGE: MAPS ──── -->
+  <section class="page" id="page-maps">
+    <div class="maps-layout">
+      <div class="map-header">
+        <span class="panel-title">⬡ HARİTA GÖRÜNÜMÜ</span>
+        <div class="map-legend">
+          <span class="legend-item drone-legend">▲ DRONE</span>
+          <span class="legend-item target-legend">◉ HEDEF</span>
+        </div>
+        <div class="map-info">
+          <span id="map-dist-label">Mesafe: --- m</span>
+          <span id="map-bearing-label">Yön: ---°</span>
+        </div>
+      </div>
+      <div class="map-canvas-wrap">
+        <canvas id="map-canvas" aria-label="Harita"></canvas>
+      </div>
+      <div class="map-coords">
+        <div class="coord-card">
+          <div class="coord-title">🚁 DRONE</div>
+          <div class="coord-vals">
+            <span>X: <b id="mc-dx">---</b></span>
+            <span>Y: <b id="mc-dy">---</b></span>
+            <span>Z: <b id="mc-dz">---</b></span>
+            <span>SPD: <b id="mc-ds">---</b> cm/s</span>
+          </div>
+        </div>
+        <div class="coord-card">
+          <div class="coord-title">🎯 HEDEF</div>
+          <div class="coord-vals">
+            <span>X: <b id="mc-tx">---</b></span>
+            <span>Y: <b id="mc-ty">---</b></span>
+            <span>Z: <b id="mc-tz">---</b></span>
+            <span>SPD: <b id="mc-ts">---</b> cm/s</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──── PAGE: SETTINGS ──── -->
+  <section class="page" id="page-settings">
+    <div class="settings-layout">
+      <h1 class="settings-title">⚙ AYARLAR</h1>
+
+      <div class="settings-card">
+        <h2 class="sc-title">📷 Kamera Kaynağı</h2>
+        <div class="sc-body">
+          <div class="radio-group">
+            <label class="radio-opt">
+              <input type="radio" name="cam-src" id="cam-src-none" value="none" checked/>
+              <span>Yok</span>
+            </label>
+            <label class="radio-opt">
+              <input type="radio" name="cam-src" id="cam-src-ip" value="ip"/>
+              <span>IP Kamera (MJPEG)</span>
+            </label>
+            <label class="radio-opt">
+              <input type="radio" name="cam-src" id="cam-src-usb" value="usb"/>
+              <span>USB Kamera</span>
+            </label>
+          </div>
+          <div class="form-row" id="ip-url-row" style="display:none;">
+            <label class="form-label" for="s-cam-url">MJPEG URL</label>
+            <input type="text" class="form-input" id="s-cam-url" placeholder="http://192.168.1.100:8080/video"/>
+          </div>
+          <div class="form-row" id="usb-row" style="display:none;">
+            <label class="form-label" for="s-usb-device">USB Kamera</label>
+            <select class="form-input" id="s-usb-device"><option value="">Cihaz seçin…</option></select>
+            <button class="btn-sm" id="btn-scan-usb">Tara</button>
+          </div>
+          <button class="btn-settings-save" id="btn-cam-apply">Kamera Uygula</button>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h2 class="sc-title">🔗 Drone Bağlantısı</h2>
+        <div class="sc-body">
+          <div class="form-row">
+            <label class="form-label" for="s-host">Simülatör Host</label>
+            <input type="text" class="form-input" id="s-host" value="127.0.0.1"/>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="s-port">Port</label>
+            <input type="number" class="form-input" id="s-port" value="12345"/>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h2 class="sc-title">🎯 PID Parametreleri</h2>
+        <div class="sc-body">
+          <div class="form-row">
+            <label class="form-label">KP_YAW <span class="hint">Yaw hassasiyet</span></label>
+            <div class="slider-num">
+              <input type="range" class="settings-slider" id="s-kp-yaw-sl" min="0" max="0.5" step="0.001" value="0.07"/>
+              <input type="number" class="form-input narrow" id="s-kp-yaw" value="0.07" step="0.001" min="0" max="0.5"/>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label">KP_PITCH <span class="hint">Pitch hassasiyet</span></label>
+            <div class="slider-num">
+              <input type="range" class="settings-slider" id="s-kp-pitch-sl" min="0" max="0.3" step="0.001" value="0.035"/>
+              <input type="number" class="form-input narrow" id="s-kp-pitch" value="0.035" step="0.001"/>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label">KP_THR <span class="hint">Throttle hassasiyet</span></label>
+            <div class="slider-num">
+              <input type="range" class="settings-slider" id="s-kp-thr-sl" min="0" max="0.1" step="0.001" value="0.01"/>
+              <input type="number" class="form-input narrow" id="s-kp-thr" value="0.01" step="0.001"/>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label">Max Throttle</label>
+            <div class="slider-num">
+              <input type="range" class="settings-slider" id="s-max-thr-sl" min="0.1" max="1" step="0.01" value="1"/>
+              <input type="number" class="form-input narrow" id="s-max-thr" value="1.0" step="0.01"/>
+            </div>
+          </div>
+          <button class="btn-settings-save" id="btn-save-settings">💾 KAYDET</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──── PAGE: ABOUT ──── -->
+  <section class="page" id="page-about">
+    <div class="about-layout">
+      <div class="about-hero">
+        <svg width="72" height="72" viewBox="0 0 28 28" fill="none">
+          <path d="M14 2L4 24h5l5-10 5 10h5L14 2z" fill="url(#fg2)"/>
+          <defs><linearGradient id="fg2" x1="14" y1="2" x2="14" y2="24" gradientUnits="userSpaceOnUse"><stop stop-color="#ff6b2b"/><stop offset="1" stop-color="#ff2b2b"/></linearGradient></defs>
+        </svg>
+        <h1>FIREFLY GCS</h1>
+        <p>Ground Control Station v1.0</p>
+        <div class="about-badge">Teknofest — Drone of War</div>
+      </div>
+      <div class="about-cards">
+        <div class="about-card"><div class="ac-icon">🎯</div><h3>Misyon</h3><p>Otonom kamikaze drone sistemi için gerçek zamanlı yer kontrol istasyonu. PID tabanlı hedef takip ve saldırı algoritması.</p></div>
+        <div class="about-card"><div class="ac-icon">🏗</div><h3>Mimari</h3><p>Python WebSocket backend, HTML5 Canvas flight instruments ve harita görünümü. Unreal Engine simülatörü ile TCP iletişimi.</p></div>
+        <div class="about-card"><div class="ac-icon">📡</div><h3>Protokol</h3><p>20Hz telemetri akışı. Drone konum, rotasyon, hız ve hedef verileri gerçek zamanlı işlenir.</p></div>
+      </div>
+      <div class="arch-diagram">
+        <div class="arch-node">🌐<div>Web GCS</div><div class="arch-sub">Browser</div></div>
+        <div class="arch-arrow">◄ ws:8765 ►</div>
+        <div class="arch-node">🐍<div>GCS Server</div><div class="arch-sub">Python</div></div>
+        <div class="arch-arrow">◄ TCP:12345 ►</div>
+        <div class="arch-node">🎮<div>Simulator</div><div class="arch-sub">Unreal Engine</div></div>
+      </div>
+      <div class="about-version">GCS v1.0 · FIREFLY SDK v2.1 · Teknofest 2025</div>
+    </div>
+  </section>
+
+</main>
+
+<script src="js/instruments.js"></script>
+<script src="js/map.js"></script>
+<script src="js/controls.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
