@@ -3,8 +3,9 @@
  */
 
 const App = (() => {
-  const WS_URL = 'ws://localhost:8765';
-  const RECONNECT_MS = 3000;
+  const WS_URL             = 'ws://localhost:8765';
+  const RECONNECT_MS       = 3000;  // Yeniden bağlanma gecikmesi (ms)
+  const CONNECT_TIMEOUT_MS = 5000;  // Bağlantı timeout süresi (ms)
 
   let ws = null;
   let armed = false;
@@ -30,32 +31,78 @@ const App = (() => {
   }
 
   // ── WebSocket ────────────────────────────────────────────
-  function setWsStatus(state) { // 'disconnected'|'connecting'|'connected'
-    const dot=document.getElementById('ws-dot');
-    const lbl=document.getElementById('ws-label');
-    if(!dot||!lbl)return;
-    dot.className='ws-dot'+({connecting:' connecting',connected:' connected'}[state]??'');
-    lbl.textContent={connecting:'BAĞLANIYOR…',connected:'BAĞLI',disconnected:'BAĞLANTI YOK'}[state];
+  /** Sunucu (WS) bağlantı durumu — Ayarlar sekmesinde gösterilir */
+  function setServerStatus(state) { // 'disconnected'|'connecting'|'connected'
+    const dot   = document.getElementById('ss-dot');
+    const stEl  = document.getElementById('ss-state');
+    const urlEl = document.getElementById('ss-url');
+    const bar   = document.getElementById('server-status-bar');
+    if(!dot) return;
+    const cls = { connecting: 'connecting', connected: 'connected' };
+    dot.className = 'ss-dot' + (cls[state] ? ' ' + cls[state] : '');
+    if(stEl)  stEl.textContent  = { connecting: 'Bağlanıyor…', connected: 'Bağlı', disconnected: 'Bağlantı yok' }[state];
+    if(urlEl) urlEl.textContent = state === 'connected' ? WS_URL : '';
+    if(bar)   bar.dataset.state = state;
+  }
+
+  /** Drone (TCP) telemetri durumu — Topbar'da gösterilir */
+  function setDroneStatus(connected) {
+    const dot = document.getElementById('drone-dot');
+    const lbl = document.getElementById('drone-label');
+    if(!dot || !lbl) return;
+    if(connected) {
+      dot.className = 'ws-dot connected';
+      lbl.textContent = 'DRONE BAĞLI';
+    } else {
+      dot.className = 'ws-dot';
+      lbl.textContent = 'DRONE YOK';
+    }
   }
 
   function connect() {
     if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
     clearTimeout(reconnectTimer);
-    setWsStatus('connecting');
+    setServerStatus('connecting');
+
+    let connectTimeoutId = null;
+    let didOpen = false;
+
     ws=new WebSocket(WS_URL);
 
+    // ── Bağlantı Timeout ──────────────────────────────────
+    // WebSocket API yerleşik timeout desteği sunmaz.
+    // CONNECT_TIMEOUT_MS içinde OPEN olmadıysa bağlantıyı iptal et.
+    connectTimeoutId = setTimeout(() => {
+      if (!didOpen && ws && ws.readyState !== WebSocket.OPEN) {
+        ws.close(); // onclose tetiklenir → yeniden deneme
+        setServerStatus('disconnected');
+        showToast(`⚠ Sunucuya bağlanılamadı (${WS_URL}) — Sunucu çalışıyor mu?`, 'error');
+        console.warn('[GCS] WS bağlantı timeout:', WS_URL);
+      }
+    }, CONNECT_TIMEOUT_MS);
+
     ws.onopen=()=>{
-      setWsStatus('connected');
+      didOpen = true;
+      clearTimeout(connectTimeoutId);
+      setServerStatus('connected');
       console.log('[GCS] WS bağlandı');
     };
 
     ws.onclose=()=>{
-      setWsStatus('disconnected');
+      clearTimeout(connectTimeoutId);
+      setServerStatus('disconnected');
       ws=null;
       reconnectTimer=setTimeout(connect, RECONNECT_MS);
     };
 
-    ws.onerror=(e)=>{console.warn('[GCS] WS hata',e);};
+    ws.onerror=(e)=>{
+      clearTimeout(connectTimeoutId);
+      console.warn('[GCS] WS bağlantı hatası', e);
+      // onclose her zaman onerror'dan sonra tetiklenir — toast burada göster
+      if (!didOpen) {
+        showToast(`⚠ Sunucuya bağlanılamadı (${WS_URL})`, 'error');
+      }
+    };
 
     ws.onmessage=(e)=>{
       try{
@@ -79,8 +126,8 @@ const App = (() => {
     if(!btn)return;
     btn.addEventListener('click',()=>{
       if(!droneConnected){
-        const host=document.getElementById('s-host')?.value??'127.0.0.1';
-        const port=parseInt(document.getElementById('s-port')?.value??12345);
+        const host=(document.getElementById('s-host')||{value:'127.0.0.1'}).value;
+        const port=parseInt((document.getElementById('s-port')||{value:12345}).value);
         send({type:'connect_drone',host,port});
         btn.textContent='BAĞLANIYOR…';btn.disabled=true;
       } else {
@@ -88,6 +135,7 @@ const App = (() => {
         droneConnected=false;
         btn.textContent='BAĞLAN';
         updateConnStatus(false);
+        setDroneStatus(false);
       }
     });
     window._setDroneConnected=(v)=>{
@@ -100,7 +148,8 @@ const App = (() => {
 
   function handleConnectResult(msg){
     const ok=msg.success;
-    window._setDroneConnected?.(ok);
+    window._setDroneConnected && window._setDroneConnected(ok);
+    setDroneStatus(ok);
     showToast(msg.message||(ok?'Bağlandı':'Bağlantı başarısız'), ok?'success':'error');
   }
 
@@ -119,7 +168,7 @@ const App = (() => {
       btn.textContent=armed?'ARMED':'DISARM';
       send({type:'set_arm',value:armed});
       // Update mode chip color
-      document.getElementById('chip-mode')?.classList.toggle('armed',armed);
+      (function(){var e=document.getElementById('chip-mode');if(e)e.classList.toggle('armed',armed);})();
     });
   }
 
@@ -133,29 +182,56 @@ const App = (() => {
       document.getElementById('mode-text').textContent=autoMode?'🎯 KAMİKAZE':'🎯 MANUEL';
       document.getElementById('lbl-mode').textContent=autoMode?'KAMİKAZE':'MANUEL';
       const chip=document.getElementById('chip-mode');
-      if(chip) chip.classList.toggle('kamikaze',autoMode);
+      if(chip) if(chip)chip.classList.toggle('kamikaze',autoMode);
       document.getElementById('hud-mode').textContent=autoMode?'KAMIKAZE':'MANUAL';
       send({type:'set_auto_mode',value:autoMode});
     });
   }
 
   // ── Send control inputs ──────────────────────────────────
+  function sendControlNow() {
+    const v = Controls.getControlValues();
+    send({ type: 'control', throttle: v.throttle, pitch: v.pitch, roll: v.roll, yaw: v.yaw, arm: armed });
+  }
+
   function initSendBtn() {
-    const btn=document.getElementById('btn-send-ctrl');
-    if(!btn)return;
-    btn.addEventListener('click',()=>{
-      const v=Controls.getControlValues();
-      send({type:'control', throttle:v.throttle, pitch:v.pitch, roll:v.roll, yaw:v.yaw, arm:armed});
-    });
+    const btn = document.getElementById('btn-send-ctrl');
+    if(btn) btn.addEventListener('click', sendControlNow);
   }
 
   // ── Save settings ────────────────────────────────────────
+  function sendSettings(data) {
+    send({ type: 'update_settings', data: data });
+  }
+
   function initSaveSettings() {
-    const btn=document.getElementById('btn-save-settings');
-    if(!btn)return;
-    btn.addEventListener('click',()=>{
-      const data=Controls.getPIDValues();
-      send({type:'update_settings',data});
+    // PID + connection together
+    const btnPid = document.getElementById('btn-save-settings');
+    if (btnPid) btnPid.addEventListener('click', () => {
+      const data = {
+        ...Controls.getPIDValues(),
+      };
+      send({ type: 'update_settings', data });
+    });
+
+    // Connection (host, port, timeout)
+    const btnConn = document.getElementById('btn-save-conn');
+    if (btnConn) btnConn.addEventListener('click', () => {
+      const host    = (function(){var e=document.getElementById('s-host');return e?e.value.trim():'127.0.0.1';})();
+      const port    = parseInt((document.getElementById('s-port')||{value:12345}).value);
+      const timeout = parseFloat((document.getElementById('s-timeout')||{value:2}).value);
+      send({ type: 'update_settings', data: { sim_host: host, sim_port: port, connect_timeout: timeout } });
+      showToast('Bağlantı ayarları kaydedildi — ' + host + ':' + port + ' (timeout: ' + timeout + 's)', 'success');
+    });
+
+    // Map base GPS
+    const btnMap = document.getElementById('btn-save-map');
+    if (btnMap) btnMap.addEventListener('click', () => {
+      const lat = parseFloat((document.getElementById('s-base-lat')||{value:39.9255}).value);
+      const lon = parseFloat((document.getElementById('s-base-lon')||{value:32.8660}).value);
+      if (isNaN(lat) || isNaN(lon)) { showToast('Geçersiz GPS koordinatı', 'error'); return; }
+      MapView.setBaseGPS(lat, lon);
+      showToast(`Harita merkezi: ${lat.toFixed(4)}, ${lon.toFixed(4)}`, 'success');
     });
   }
 
@@ -169,20 +245,22 @@ const App = (() => {
     if(s.camera_url){setVal('s-cam-url',s.camera_url);}
     if(s.sim_host){setVal('s-host',s.sim_host);}
     if(s.sim_port){setVal('s-port',s.sim_port);}
+    if(s.connect_timeout){setVal('s-timeout',s.connect_timeout);}
   }
 
   // ── Telemetry update ─────────────────────────────────────
   function handleTelemetry(data){
     lastTelemetry=data;
+    setDroneStatus(data && data.connected === true);
 
-    const d=data?.drone??{};
-    const t=data?.target??{};
-    const pos=d.position??[0,0,0];
-    const rot=d.rotation??[0,0,0];
-    const spd=d.speed??0;
-    const alt=d.altitude??0;
-    const tpos=t.position??[0,0,0];
-    const tspd=t.speed??0;
+    const d=(data&&data.drone)||{};
+    const t=(data&&data.target)||{};
+    const pos=d.position||[0,0,0];
+    const rot=d.rotation||[0,0,0];
+    const spd=d.speed||0;
+    const alt=d.altitude||0;
+    const tpos=t.position||[0,0,0];
+    const tspd=t.speed||0;
 
     const fmt=(v,n=1)=>typeof v==='number'?v.toFixed(n):'---';
     const setT=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
@@ -205,7 +283,7 @@ const App = (() => {
 
     // Mission phase
     let phase='BEKLEME', lockTxt='YOK', apprTxt='---';
-    if(autoMode && data?.connected!==false){
+    if(autoMode && data && data.connected!==false){
       if(dist>4500){phase='FAZ 1 — YAKALAMA';lockTxt='AKTİF';apprTxt='AGRESIF';}
       else if(dist>0){phase='FAZ 2 — YAKLAŞIM';lockTxt='KİLİTLİ';apprTxt='HASSAS';}
     }
@@ -217,15 +295,20 @@ const App = (() => {
     const lock=document.getElementById('lock-indicator');
     if(lock) lock.classList.toggle('hidden', lockTxt==='YOK');
 
-    // Demo tag
+    // Demo tag — artık idle durumu gösterir
     const demoTag=document.getElementById('demo-tag');
-    if(demoTag) demoTag.classList.toggle('hidden', data?.demo===false&&data?.connected===true);
+    if(demoTag){
+      const isIdle = data && data.idle === true;
+      const isConnected = data && data.connected === true;
+      demoTag.textContent = isConnected ? '' : 'BAĞLI DEĞİL';
+      demoTag.classList.toggle('hidden', isConnected);
+    }
 
     // Instruments
     Instruments.update(data);
 
     // Map (if on maps page)
-    const mapsActive=document.getElementById('page-maps')?.classList.contains('active');
+    const mapsActive=(function(){var e=document.getElementById('page-maps');return e&&e.classList.contains('active');})();
     if(mapsActive) MapView.update(data);
   }
 
@@ -244,7 +327,7 @@ const App = (() => {
       document.body.appendChild(t);
     }
     const colors={success:['#00ff88','#002a1a'],error:['#ff2b2b','#2a0000'],info:['#00d4ff','#001a2a']};
-    const [fg,bg]=colors[type]??colors.info;
+    const [fg,bg]=colors[type]||colors.info;
     t.style.color=fg;t.style.background=bg;t.style.borderColor=fg;
     t.textContent=msg;t.style.opacity='1';
     clearTimeout(t._timer);
@@ -264,15 +347,19 @@ const App = (() => {
     initSaveSettings();
     connect();
 
+    // Kontrol slider'ları değişince otomatik gönder
+    Controls.setAutoSendCallback(sendControlNow);
+
     // Resize map on window resize
-    window.addEventListener('resize',()=>{
-      if(document.getElementById('page-maps')?.classList.contains('active')) MapView.resize();
+    window.addEventListener('resize', function() {
+      const mp = document.getElementById('page-maps');
+      if(mp && mp.classList.contains('active')) MapView.resize();
     });
 
     console.log('[GCS] FIREFLY Ground Control Station başlatıldı');
   }
 
-  return { init };
+  return { init: init, showToast: showToast, sendSettings: sendSettings };
 })();
 
 document.addEventListener('DOMContentLoaded', App.init);

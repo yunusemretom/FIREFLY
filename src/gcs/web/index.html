@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <!-- Leaflet.js world map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <link rel="stylesheet" href="css/style.css"/>
 </head>
 <body>
@@ -43,10 +45,10 @@
       <span class="batt-icon" id="batt-icon">🔋</span>
       <span class="chip-label" id="lbl-battery">---%</span>
     </div>
-    <!-- WS Connection -->
-    <div class="ws-indicator" id="ws-indicator">
-      <span class="ws-dot" id="ws-dot"></span>
-      <span class="ws-label" id="ws-label">BAĞLANTI YOK</span>
+    <!-- Drone Telemetri Durumu -->
+    <div class="ws-indicator" id="drone-indicator">
+      <span class="ws-dot" id="drone-dot"></span>
+      <span class="ws-label" id="drone-label">DRONE YOK</span>
     </div>
     <button class="btn-connect" id="btn-drone-connect">BAĞLAN</button>
   </div>
@@ -203,7 +205,7 @@
         </div>
       </div>
       <div class="map-canvas-wrap">
-        <canvas id="map-canvas" aria-label="Harita"></canvas>
+        <div id="leaflet-map" style="width:100%;height:100%;"></div>
       </div>
       <div class="map-coords">
         <div class="coord-card">
@@ -273,6 +275,95 @@
           <div class="form-row">
             <label class="form-label" for="s-port">Port</label>
             <input type="number" class="form-input" id="s-port" value="12345"/>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="s-timeout">Bağlantı Timeout (sn) <span class="hint">Varsayılan: 2</span></label>
+            <input type="number" class="form-input" id="s-timeout" value="2" min="1" max="30" step="1"/>
+          </div>
+          <button class="btn-settings-save" id="btn-save-conn">🔗 Bağlantı Kaydet</button>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h2 class="sc-title">🗺 Harita Ayarları</h2>
+        <div class="sc-body">
+          <p class="form-hint" style="color:var(--text-dim);font-size:11px;line-height:1.6;margin-bottom:6px;">Simülatör koordinatları (cm) dünya haritasına yansıtmak için bir başlangıç GPS konumu girin. Drone bu noktadan offset olarak gösterilir.</p>
+          <div class="form-row">
+            <label class="form-label" for="s-base-lat">Başlangıç Enlem (Lat)</label>
+            <input type="number" class="form-input" id="s-base-lat" value="39.9255" step="0.0001" placeholder="39.9255"/>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="s-base-lon">Başlangıç Boylam (Lon)</label>
+            <input type="number" class="form-input" id="s-base-lon" value="32.8660" step="0.0001" placeholder="32.8660"/>
+          </div>
+          <button class="btn-settings-save" id="btn-save-map">🗺 Harita Ayarla</button>
+        </div>
+      </div>
+
+      <!-- Sunucu Bağlantı Durumu Şeridi -->
+      <div class="server-status-bar" id="server-status-bar">
+        <span class="ss-dot" id="ss-dot"></span>
+        <span class="ss-label">GCS SUNUCU</span>
+        <span class="ss-state" id="ss-state">Bağlantı yok</span>
+        <span class="ss-url" id="ss-url"></span>
+      </div>
+
+      <!-- Harita Ayarları -->
+      <div class="settings-card">
+        <h2 class="sc-title">🕹 Kontrol Limitleri</h2>
+        <div class="sc-body">
+          <p class="form-hint" style="color:var(--text-dim);font-size:11px;line-height:1.6;margin-bottom:10px;">
+            Kontroller sekmesindeki slider'ların minimum ve maksimum değerlerini ayarlayın.<br>
+            Throttle: <code>-1.0</code> (alçal) → <code>0.0</code> (hover) → <code>1.0</code> (tırman)
+          </p>
+
+          <!-- Throttle -->
+          <div class="form-row">
+            <label class="form-label">Throttle <span class="hint">[-1.0 … 1.0]</span></label>
+            <div class="limit-row">
+              <span class="limit-lbl">Min</span>
+              <input type="number" class="form-input narrow" id="s-thr-min" value="-1" step="0.1" min="-1" max="0"/>
+              <span class="limit-lbl">Max</span>
+              <input type="number" class="form-input narrow" id="s-thr-max" value="1" step="0.1" min="0" max="1"/>
+            </div>
+          </div>
+
+          <!-- Pitch -->
+          <div class="form-row">
+            <label class="form-label">Pitch <span class="hint">[-1.0 … 1.0]</span></label>
+            <div class="limit-row">
+              <span class="limit-lbl">Min</span>
+              <input type="number" class="form-input narrow" id="s-pitch-min" value="-1" step="0.1" min="-1" max="0"/>
+              <span class="limit-lbl">Max</span>
+              <input type="number" class="form-input narrow" id="s-pitch-max" value="1" step="0.1" min="0" max="1"/>
+            </div>
+          </div>
+
+          <!-- Roll -->
+          <div class="form-row">
+            <label class="form-label">Roll <span class="hint">[-1.0 … 1.0]</span></label>
+            <div class="limit-row">
+              <span class="limit-lbl">Min</span>
+              <input type="number" class="form-input narrow" id="s-roll-min" value="-1" step="0.1" min="-1" max="0"/>
+              <span class="limit-lbl">Max</span>
+              <input type="number" class="form-input narrow" id="s-roll-max" value="1" step="0.1" min="0" max="1"/>
+            </div>
+          </div>
+
+          <!-- Yaw -->
+          <div class="form-row">
+            <label class="form-label">Yaw <span class="hint">[-1.0 … 1.0]</span></label>
+            <div class="limit-row">
+              <span class="limit-lbl">Min</span>
+              <input type="number" class="form-input narrow" id="s-yaw-min" value="-1" step="0.1" min="-1" max="0"/>
+              <span class="limit-lbl">Max</span>
+              <input type="number" class="form-input narrow" id="s-yaw-max" value="1" step="0.1" min="0" max="1"/>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn-settings-save" id="btn-save-ctrl-limits">💾 Limitleri Kaydet</button>
+            <button class="btn-settings-reset" id="btn-reset-ctrl-limits">↺ Varsayılana Döndür</button>
           </div>
         </div>
       </div>
@@ -344,6 +435,7 @@
 
 </main>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="js/instruments.js"></script>
 <script src="js/map.js"></script>
 <script src="js/controls.js"></script>

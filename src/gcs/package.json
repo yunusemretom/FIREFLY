@@ -1,0 +1,14 @@
+{
+  "name": "firefly-gcs-server",
+  "version": "1.0.0",
+  "description": "FIREFLY GCS — Node.js WebSocket + HTTP sunucusu",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.17.0"
+  }
+}

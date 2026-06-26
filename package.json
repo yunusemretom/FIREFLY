@@ -5,6 +5,7 @@
   "main": "src/gcs/main.js",
   "scripts": {
     "start": "electron .",
+    "gcs": "node src/gcs/server.js",
     "gcs-bridge": "node src/gcs/index.js",
     "test": "echo \"Error: no test specified\" && exit 0"
   },
