@@ -181,7 +181,7 @@ class DroneGUI:
         self.throttle_slider = tk.Scale(
             thr_frame,
             from_=1.0,
-            to=0.0,
+            to=-2.0,
             resolution=0.01,
             orient=tk.VERTICAL,
             length=220,
