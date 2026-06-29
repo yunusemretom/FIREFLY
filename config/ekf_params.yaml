@@ -1,5 +1,35 @@
-# Extended Kalman Filter Parameters
-ekf_noise:
-  process_noise_covariance_q: 0.01
-  measurement_noise_covariance_r: 0.1
-  initial_state_covariance_p: 1.0
+# Extended Kalman Filter Parameters for Target Tracking
+
+# --- Target EKF (TargetEKF class) ---
+target_ekf:
+  # Fixed-wing target kinematic constraint
+  constant_speed_cms: 1500.0
+
+  # Process noise
+  # position: small drift allowed per step
+  # velocity: higher noise to track direction changes on a looped/reversing path
+  process_noise:
+    position: 500.0       # cm^2
+    velocity: 80000.0     # (cm/s)^2 — ~283 cm/s direction-change budget per step
+
+  # GPS measurement noise (cm^2)
+  # ~100 cm std-dev ≈ 1 m positional accuracy
+  measurement_noise:
+    position: 10000.0
+
+  # Initial state covariance
+  initial_covariance:
+    position: 1000000.0   # cm^2  (1 km uncertainty at start)
+    velocity: 4000000.0   # (cm/s)^2
+
+  # Outlier / dropout handling
+  outlier_rejection:
+    # Mahalanobis distance threshold for spike rejection
+    # chi2(3 DOF, 99.9%) = 16.3; use conservative 5.0 for competition noise
+    mahalanobis_threshold: 5.0
+    # Positions closer than this to the previous measurement are treated as dropout
+    min_position_change_cm: 10.0
+
+  # Bootstrap: minimum samples before the filter activates
+  init:
+    startup_samples: 2

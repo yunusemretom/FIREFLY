@@ -1,6 +1,6 @@
 flight:
   base_throttle: 0.0            # SDK: 0 = hover, +1 = max climb, -1 = max descent
-  camera_tilt: 35.0
+  camera_tilt: 20.0
   dt: 0.02
   chase_speed: 2800.0           # SEYIR hızı (100 km/h)
   takip_speed_margin: 500.0     # TAKIP'te hedefe göre fazla hız (yaklaşma marjı)
@@ -19,7 +19,7 @@ thresholds:
 inner_pid:
   pitch: {kp: 0.045, ki: 0.0, kd: 0.005}
   roll: {kp: 0.35, ki: 0.0, kd: 0.002}
-  yaw: {kp: 0.035, ki: 0.0, kd: 0.005}
+  yaw: {kp: 0.035, ki: 0.0005, kd: 0.002}
 
 outer_pid:
   altitude: {kp: 0.20, ki: 0.02, kd: 0.05, clamp_min: -1.0, clamp_max: 0.45, int_limit: 2.0}
@@ -27,3 +27,18 @@ outer_pid:
 
 slew:
   pitch_max_change_per_sec: 20.0
+
+# --- 5-metre arkadan takip güdümü ---
+pursuit:
+  follow_distance_cm: 1000.0   # hedefin kaç cm arkasında kal (değiştirilebilir)
+
+  # Dış döngü PID: imzalı mesafe hatası (cm) → hız düzeltmesi (cm/s)
+  # P: anlık hata, D: yaklaşma/uzaklaşma hızı (overshoot önler), I: sabit kayma giderir
+  distance_pid:
+    kp: 1.6
+    ki: 1.3
+    kd: 0.1
+    int_limit: 200.0          # integral kaymasını ±200 cm/s ile sınırla
+
+  min_speed_cms: 50.0        # minimum ileri hız (durma/geri gitme engeli)
+  max_speed_cms: 2800.0       # maksimum yaklaşma hızı

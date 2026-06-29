@@ -111,7 +111,7 @@ def run_simulation():
             drone.set_control_surfaces(
                 clamp(target_throttle, -1.0, 1.0),
                 -clamp(pitch_cmd, -1.0, 1.0),
-                -roll_cmd,
+                -clamp(roll_cmd, -1.0, 1.0),
                 clamp(yaw_cmd, -1.0, 1.0),
                 True,
             )
