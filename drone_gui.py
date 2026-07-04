@@ -6,10 +6,6 @@ import time
 import math
 import sys, os
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "src", "python", "navigation"))
-from nav_integration import NavigationSystem
-
 
 class DroneGUI:
     def __init__(self, root):
@@ -19,13 +15,17 @@ class DroneGUI:
         self.root.configure(bg="#0A0A0A")
 
         self.kamikaze_state = "ATTACK"
-        self.nav = NavigationSystem(corrupt_for_test=False,
-                                    intercept_time=0.3,
-                                    sigma_a=1500.0)
         self.last_tar_speed = 0.0
         self.last_gps_ok = True
 
         self.PITCH_SIGN = -1.0
+
+        # Excel Kaydı Veri Yapıları
+        self.target_log = []
+        self.start_time = time.time()
+
+        # Pencere Kapatma Protokolü
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.style = ttk.Style()
         self.style.theme_use("clam")
@@ -67,6 +67,24 @@ class DroneGUI:
         )
         self.connect_btn.pack(pady=5)
 
+        # Excel Kaydet Butonu
+        self.save_excel_btn = tk.Button(
+            root,
+            text="EXPORT EXCEL LOGS",
+            command=self.save_to_excel,
+            bg="#1A1A1A",
+            fg="white",
+            activebackground="#333333",
+            activeforeground="#00FF41",
+            relief=tk.FLAT,
+            height=2,
+            width=25,
+            font=("Segoe UI", 10, "bold"),
+            bd=1,
+            highlightbackground="#00FF41",
+        )
+        self.save_excel_btn.pack(pady=5)
+
         # Update Loop
         self.running = True
         self.update_thread = threading.Thread(target=self.control_loop, daemon=True)
@@ -100,6 +118,7 @@ class DroneGUI:
             ("ALTITUDE", "0.00 cm"),
             ("TARGET POS", "0.0, 0.0, 0.0"),
             ("TARGET SPEED", "0.00 cm/s"),
+            ("LOGGED PTS", "0 points"),
         ]
 
         for i, (label, value) in enumerate(fields):
@@ -285,7 +304,7 @@ class DroneGUI:
                 except Exception:
                     pass
                 print(f"[loop uyari] {e}")
-            time.sleep(0.05)
+            time.sleep(0.02)
 
     def _loop_iteration(self, KP_YAW, KP_PITCH, KP_THR, BASE_HOVER_THR):
             if drone.is_connected():
@@ -294,15 +313,31 @@ class DroneGUI:
                     d_rot = t["drone"]["rotation"]
                     d_speed = t["drone"]["speed"]
 
-                    nav_out = self.nav.process(t)
-                    dx = nav_out["dx"]
-                    dy = nav_out["dy"]
-                    dz = nav_out["dz"]
-                    dist_3d = nav_out["dist_3d"]
-                    dist_2d = nav_out["dist_2d"]
-                    tar_speed = nav_out["target_speed"]      # EKF'ten gercek hedef hizi
+                    # Inline Navigation Calculations (removed nav_integration dependency)
+                    d_pos = t["drone"]["position"]
+                    tar_pos = t["target"]["position"]
+                    dx = tar_pos[0] - d_pos[0]
+                    dy = tar_pos[1] - d_pos[1]
+                    dz = tar_pos[2] - d_pos[2]
+                    dist_2d = math.hypot(dx, dy)
+                    dist_3d = math.hypot(dist_2d, dz)
+                    tar_speed = t["target"].get("speed", 0.0)
+
+                    nav_out = {
+                        "dx": dx,
+                        "dy": dy,
+                        "dz": dz,
+                        "dist_3d": dist_3d,
+                        "dist_2d": dist_2d,
+                        "target_speed": tar_speed,
+                        "gps_ok": True,
+                        "waypoint": tar_pos,
+                        "target_pos": tar_pos,
+                        "target_uncertainty": 0.0,
+                        "closing_speed": 0.0
+                    }
                     self.last_tar_speed = tar_speed
-                    self.last_gps_ok = nav_out["gps_ok"]
+                    self.last_gps_ok = True
 
                     try:
                         ham = t["target"]["position"]
@@ -406,7 +441,7 @@ class DroneGUI:
                     level = -d_rot[0] * 0.15                         # yataya donme egilimi
                     final_roll = bank + level
                     self._roll_smooth = getattr(self, "_roll_smooth", 0.0)
-                    self._roll_smooth = 0.75 * self._roll_smooth + 0.25 * final_roll
+                    self._roll_smooth = 0.50 * self._roll_smooth + 0.25 * final_roll
                     final_roll = self._roll_smooth
 
                     fy = max(-1.0, min(1.0, final_yaw))
@@ -417,7 +452,7 @@ class DroneGUI:
                     drone.set_throttle(
                         max(-0.8, min(self.max_throttle_slider.get(), final_thr))
                     )
-                    drone.set_roll(fr)
+                    drone.set_roll(-fr)
                     drone.set_arm(True)
 
                     self.yaw_slider.set(fy)
@@ -444,6 +479,29 @@ class DroneGUI:
                 d = t["drone"]
                 tar = t["target"]
 
+                # Hedef Konumunu Excel Log Listesine Ekle
+                try:
+                    truth = drone.get_debug_truth()
+                except Exception:
+                    truth = {}
+
+                truth_available = truth.get("available", False)
+                truth_pos = truth.get("target", {}).get("position", [None, None, None]) if truth_available else [None, None, None]
+                truth_speed = truth.get("target", {}).get("speed", None) if truth_available else None
+
+                self.target_log.append({
+                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+                    "Time_Relative": round(time.time() - self.start_time, 2),
+                    "Target_Noisy_X": tar["position"][0],
+                    "Target_Noisy_Y": tar["position"][1],
+                    "Target_Noisy_Z": tar["position"][2],
+                    "Target_Noisy_Speed": tar.get("speed", 0.0),
+                    "Target_Real_X": truth_pos[0],
+                    "Target_Real_Y": truth_pos[1],
+                    "Target_Real_Z": truth_pos[2],
+                    "Target_Real_Speed": truth_speed,
+                })
+
                 self.telemetry_labels["DRONE POS"].set(
                     f"{d['position'][0]:.1f}, {d['position'][1]:.1f}, {d['position'][2]:.1f}"
                 )
@@ -463,6 +521,7 @@ class DroneGUI:
                     self.telemetry_labels["TARGET SPEED"].set(
                         f"{tar.get('speed', 0.0):.2f} cm/s"
                     )
+                self.telemetry_labels["LOGGED PTS"].set(f"{len(self.target_log)} points")
             else:
 
                 self.status_var.set("LINK LOST - RECONNECTING...")
@@ -473,6 +532,34 @@ class DroneGUI:
                         self.status_label.config(fg="#00FF41")
                 except Exception:
                     pass
+    def save_to_excel(self):
+        """Kaydedilen hedef konum verilerini Excel dosyasına aktarır."""
+        if not self.target_log:
+            print("Kaydedilecek hedef konum verisi bulunamadı.")
+            self.status_var.set("NO LOGS TO EXPORT")
+            self.status_label.config(fg="#FF3131")
+            return
+        
+        try:
+            import pandas as pd
+            df = pd.DataFrame(self.target_log)
+            filename = "hedef_konumlari.xlsx"
+            df.to_excel(filename, index=False)
+            msg = f"Saved: {len(self.target_log)} pts to {filename}"
+            print(msg)
+            self.status_var.set("EXCEL SAVED")
+            self.status_label.config(fg="#00FF41")
+        except Exception as e:
+            err_msg = f"Excel save error: {e}"
+            print(err_msg)
+            self.status_var.set("SAVE ERROR")
+            self.status_label.config(fg="#FF3131")
+
+    def on_close(self):
+        """Pencere kapatıldığında verileri kaydeder ve temiz çıkar."""
+        self.running = False
+        self.save_to_excel()
+        self.root.destroy()
 
 
 if __name__ == "__main__":

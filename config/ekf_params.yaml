@@ -1,35 +1,118 @@
-# Extended Kalman Filter Parameters for Target Tracking
+# =============================================================================
+# Extended Kalman Filter (EKF) Parametreleri - CTRV Modeli
+# Hedef: Sabit Kanatlı RC Uçak (Fixed-Wing Target) Takibi
+# =============================================================================
 
-# --- Target EKF (TargetEKF class) ---
-target_ekf:
-  # Fixed-wing target kinematic constraint
-  constant_speed_cms: 1500.0
+# --- CTRV EKF (FixedWingEKF class) ---
+ctrv_ekf:
 
-  # Process noise
-  # position: small drift allowed per step
-  # velocity: higher noise to track direction changes on a looped/reversing path
+  # ---- Durum vektörü boyutu: [x, y, theta, v, omega] ----
+  # x, y     : 2D yatay konum (cm)
+  # theta    : yaw açısı (rad)
+  # v        : doğrusal hız (cm/s)
+  # omega    : dönüş hızı yaw_rate (rad/s)
+
+  # -------------------------------------------------------------------------
+  # SÜREÇ GÜRÜLTÜSÜ (Q Matrisi) — "Filtrenin GPS'e ne kadar güveneceği"
+  # -------------------------------------------------------------------------
+  # Mantık:
+  #   CTRV modeli, sabit kanatlı uçağın dönüş yörüngesini oldukça iyi modeller.
+  #   Bu nedenle süreç gürültüsünü DÜŞÜK tutuyoruz: filtre kendi kinematik
+  #   tahminlerine daha çok güvenir, GPS sıçramalarını yutmaz.
+  #
+  #   q_xy    : Konum süreç gürültüsü küçük tutulur (CTRV modeli konumu doğru
+  #             tahmin eder); büyük olsaydı filtre GPS'e daha çok ağırlık verirdi.
+  #   q_theta : Heading belirsizliği orta düzey; GPS dropout'ta ölçüm gelmediğinde
+  #             hızlı drift'i önler.
+  #   q_v     : Sabit kanatlının hızı çok az değişir → küçük gürültü.
+  #   q_omega : Dönüş hızı, dönüş manevralarında değişebilir → orta düzey.
+  #
+  # Sonuç: Düşük Q + Yüksek R → filtre GPS'e ani inanmaz, pürüzsüz tahmin üretir.
+  # -------------------------------------------------------------------------
   process_noise:
-    position: 500.0       # cm^2
-    velocity: 80000.0     # (cm/s)^2 — ~283 cm/s direction-change budget per step
+    q_xy:    1.0        # cm^2  — konum model gürültüsü (GPS güncellemelerini
+                        # Mahalanobis testinde tutacak kadar büyük olmalı)
+    q_theta: 0.001      # rad^2 — heading gürültüsü
+    q_v:     100.0      # (cm/s)^2 — hız belirsizliği; EKF hızı GPS’ten öğrenemez
+    q_omega: 0.0001     # (rad/s)^2 — yaw_rate gürültüsü
 
-  # GPS measurement noise (cm^2)
-  # ~100 cm std-dev ≈ 1 m positional accuracy
+  # -------------------------------------------------------------------------
+  # ÖLÇÜM GÜRÜLTÜSÜ (R Matrisi) — "GPS'e ne kadar güvenilir?"
+  # -------------------------------------------------------------------------
+  # Mantık:
+  #   SDK'daki hedef GPS max 1 Hz gelir ve; konum gürültüsü, sabit offset,
+  #   ani zıplama (spike) ve dropout efektlerine tabidir.
+  #   R değerini YÜKSEK tutuyoruz: filtre bir GPS sıçraması geldiğinde onu
+  #   direkt kabul etmek yerine kendi CTRV yörüngesiyle harmanlayarak geçer.
+  #   r_xy = 40000 cm^2 → ~200 cm (2m) standart sapma.
+  #   Bu değer, yarışma sırasında çevre gürültüsünü temsil eder.
+  #   Gerçek GPS'in <5m hata yaptığı bir ortamda bu değer koruyucu ama
+  #   filtrenin kaymasını önleyecek kadar makul bir dengedir.
+  # -------------------------------------------------------------------------
   measurement_noise:
-    position: 10000.0
+    r_xy: 10000.0       # cm^2  (~1 m standart sapma)
+                        # Mantık: 40000 cm^2 (2m) çok yüksekti, GPS güncellemeleri
+                        # Mahalanobis testini geçemiyordu. 10000 cm^2 (1m) hem
+                        # spike’lara dayanıklı hem de yörüngeyi takip edebilir.
 
-  # Initial state covariance
+  # -------------------------------------------------------------------------
+  # BAŞLANGIÇ KOVARYANS MATRİSİ (P0)
+  # -------------------------------------------------------------------------
+  # Başlangıçta konum hakkında çok az bilgimiz var → büyük belirsizlik.
+  # Filtre ilerledikçe P küçülecek ve tahminler kararlı hale gelecek.
+  # -------------------------------------------------------------------------
   initial_covariance:
-    position: 1000000.0   # cm^2  (1 km uncertainty at start)
-    velocity: 4000000.0   # (cm/s)^2
+    p_xy:    250000.0   # cm^2  — başlangıç konum belirsizliği (~50 m)
+                        # 1e6 çok büyük: ilk GPS’ten sonra P çok küçülüyor
+                        # ve Mahalanobis testi çok katı oluyor.
+    p_theta: 39.48      # rad^2 — 4*pi^2 (tam belirsizlik + marj)
+    p_v:     4000000.0  # (cm/s)^2 — hız belirsizliği büyük tutulur; GPS
+                        # sadece konum ölçüer, hız ancak zaman içinde öğrenilir.
+    p_omega: 10.0       # (rad/s)^2 — yaw_rate belirsizliği
 
-  # Outlier / dropout handling
+  # -------------------------------------------------------------------------
+  # AYKIRI DEĞER REDDİ (Outlier Rejection)
+  # -------------------------------------------------------------------------
+  # Ani GPS zıplaması (spike) Mahalanobis uzaklığı ile tespit edilir.
+  # chi2(2 DOF, 99.9%) = 13.82 → bu eşiğin üzerindeki ölçümler reddedilir.
+  # -------------------------------------------------------------------------
   outlier_rejection:
-    # Mahalanobis distance threshold for spike rejection
-    # chi2(3 DOF, 99.9%) = 16.3; use conservative 5.0 for competition noise
-    mahalanobis_threshold: 5.0
-    # Positions closer than this to the previous measurement are treated as dropout
-    min_position_change_cm: 10.0
+    mahalanobis_threshold: 13.82   # chi2(2, 99.9%)
+    enabled: true
 
-  # Bootstrap: minimum samples before the filter activates
+  # -------------------------------------------------------------------------
+  # ÇALIŞMA PARAMETRELERİ
+  # -------------------------------------------------------------------------
+  prediction:
+    dt_predict: 0.1        # saniye — tahmin adımı frekansı (10 Hz)
+    gps_dt:     1.0        # saniye — GPS güncelleme aralığı (1 Hz)
+
+  # Başlangıç bootstrap: ilk N ölçüm gelmeden filtre aktif olmaz
+  init:
+    startup_samples: 2
+    default_speed_cms: 1500.0   # Başlangıç hız tahmini (cm/s)
+    warmup_updates: 5           # İlk N GPS güncellemesinde Mahalanobis testi devre dışı
+                                # (heading yakınsaması için)
+
+  # Sayısal kararlılık: kovaryans matrisinin simetrik kalması için regularizasyon
+  numerical:
+    jitter: 1.0e-6
+
+# --- Legacy TargetEKF parametreleri (geriye dönük uyumluluk) ---
+target_ekf:
+  constant_speed_cms: 1500.0
+  process_noise:
+    position: 0.5
+    velocity: 5.0
+    heading: 0.0001
+    yaw_rate: 0.00001
+  measurement_noise:
+    position: 2500.0
+  initial_covariance:
+    position: 1000000.0
+    velocity: 4000000.0
+  outlier_rejection:
+    mahalanobis_threshold: 11.34
+    min_position_change_cm: 10.0
   init:
     startup_samples: 2

@@ -48,31 +48,53 @@ s = r · û   (nokta çarpımı, izdüşüm)
 | `s > 0` | Drone çok yakın | Yavaşla |
 | `s >> 0` | Drone geçmek üzere | Önemli ölçüde yavaşla |
 
-### 2.3 Hız Düzenlemesi — Dış PID
+### 2.3 Hız Düzenlemesi — Dış PID + Sqrt Profili
 
-İmzalı mesafe hatası bir **PID kontrolcüsüne** beslenir:
+Sistemin iki katmanlı hız kontrolü vardır:
 
+**Adım 1 — Dış PID:**
 ```
 hata = 0 − s = −s
-dist_correction = dist_pid.calculate(hata, dt)
-target_speed = hedef_uçak_hızı + dist_correction
+raw_correction = dist_pid.calculate(hata, dt)
+```
+
+**Adım 2 — Sqrt hız profili (overshoot güvencesi):**
+```
+v_safe = sqrt(2 · approach_accel · |s|)       [sadece s < 0 iken]
+correction = min(raw_correction, v_safe)
+
+target_speed = hedef_hızı + correction
 target_speed = clamp(target_speed, min_speed, max_speed)
 ```
 
-Örnek sayısal değerler (`kp=0.5`, `kd=0.15`):
+Fiziksel gerçek: `approach_accel` ivmeyle frenleme yapan bir araç, `d` mesafede en fazla `v_safe` hızında yaklaşabilir. Bu limiti aşarsa kalan mesafede duramaz → overshoot.
 
-| s (cm) | Durum | Hedef hız (cm/s) |
-|---|---|---|
-| −1000 | 10 m geride | ~2000 (hızlanıyor) |
-| −500 | 5 m geride | ~1750 |
-| 0 | Mükemmel | 1500 (hedefle eş) |
-| +200 | 2 m yakın | ~1400 (yavaşlıyor) |
-| +600 | 6 m yakın | ~1200 |
-| +1500 | 15 m yakın | ~750 (önemli frenleme) |
+Örnek sayısal değerler (`kp=0.4`, `approach_accel=300`):
 
-**D terimi** yaklaşma/uzaklaşma *hızına* tepki verir: mesafe kapanırken önceden frenlemeye başlar → overshoot azalır, daha yumuşak geçiş olur.
+| s (cm) | P terimi | sqrt_cap | Uygulanan | Hedef hız |
+|---|---|---|---|---|
+| −2000 | 800 | 1095 | **800** (P) | 2300 |
+| −1000 | 400 | 775 | **400** (P) | 1900 |
+| −500 | 200 | 548 | **200** (P) | 1700 |
+| −200 | 80 | 346 | **80** (P) | 1580 |
+| −100 | 40 | 245 | **40** (P) | 1540 |
+| 0 | 0 | — | **0** | 1500 |
+| +200 | −80 | — | **−80** | 1420 |
 
-**I terimi** küçük sabit kaymaları ortadan kaldırır (örn. rüzgar vb. sürekli disturbance).
+> **Neden `kd=0`?** D terimi, mesafe kapanırken negatif türev üretir ve uzaktan yaklaşmayı fazlaca frenler. Sqrt profili frenleme görevini zaten fiziksel olarak garanti eder; D terimi gereksiz ve zararlıdır.
+
+**I terimi** küçük sabit kaymaları ortadan kaldırır (örn. sürekli bir disturbance).
+
+### 2.4 İşaret Değişiminde Integral Sıfırlama
+
+`s` işareti değiştiğinde (drone follow_point'i geçip geri döndüğünde) integral birikim sıfırlanır:
+
+```python
+if prev_s * s < 0:
+    dist_pid.integral = 0.0
+```
+
+Bu, uzun süre geride kalan drone'da biriken integralin geçiş noktasında overshoot yapmasını engeller (anti-windup).
 
 ---
 
@@ -136,15 +158,20 @@ Bu, pitch (ileri hız) ve throttle (irtifa) eksenlerinin birbirinden bağımsız
 ```yaml
 pursuit:
   follow_distance_cm: 1000.0   # Hedefin kaç cm arkasında kal
+                                # 50   →  0.5 m (çok yakın)
                                 # 500  →  5 m
-                                # 1000 → 10 m (varsayılan)
+                                # 1000 → 10 m (tipik)
                                 # 2000 → 20 m
 
   distance_pid:                 # Dış döngü: mesafe → hız
-    kp: 0.5                     # Orantısal: 100 cm hata → 50 cm/s düzeltme
+    kp: 0.4                     # Orantısal: 100 cm hata → 40 cm/s düzeltme
     ki: 0.02                    # İntegral: sabit kayma giderir
-    kd: 0.15                    # Türev: yaklaşma hızına önceden tepki
-    int_limit: 200.0            # İntegral sınırı ±200 cm/s
+    kd: 0.0                     # Türev KULLANILMAZ — sqrt profili frenlemeyi üstlenir
+    int_limit: 100.0            # İntegral sınırı ±100 cm/s
+
+  approach_accel_cms2: 300.0    # Sqrt profil fren bütçesi
+                                # v_safe = sqrt(2 * 300 * |s|)
+                                # Küçük → yavaş/yumuşak, Büyük → hızlı/agresif
 
   min_speed_cms: 200.0          # Minimum ileri hız (durma engeli)
   max_speed_cms: 2800.0         # Maksimum yaklaşma hızı (~100 km/h)
@@ -154,26 +181,27 @@ pursuit:
 
 | Parametre | Küçük değer | Büyük değer |
 |---|---|---|
-| `follow_distance_cm` | Daha yakın takip, çarpışma riski artar | Daha güvenli ama daha az agresif |
-| `distance_pid.kp` | Yavaş tepki, mesafe stabilitesi zayıf | Hızlı tepki ama sallantı/overshoot riski |
-| `distance_pid.kd` | Overshoot artar | Frenleme erken başlar, daha yumuşak |
-| `distance_pid.ki` | Sabit kayma kalabilir | Kayma giderilir ama windup riski |
+| `follow_distance_cm` | Daha yakın takip, overshoot riski artar | Daha geniş marj, daha az hassas |
+| `distance_pid.kp` | Yavaş yaklaşım (uzun süre geri kalır) | Hızlı yaklaşım ama salınım riski |
+| `distance_pid.ki` | Sabit kayma kalabilir | Kayma giderilir, windup riski artar |
+| `distance_pid.kd` | (0 tutulmalı — sqrt profili var) | Uzaktan yaklaşmayı aşırı frenler |
+| `approach_accel_cms2` | Yavaş/yumuşak yaklaşım, az overshoot | Hızlı kapanma ama geç frenleme |
 | `min_speed_cms` | Drone durabilir/geri gidebilir | Drone her zaman biraz ilerler |
 | `max_speed_cms` | Yaklaşma yavaşlar | Daha hızlı kapanma |
 
 ### Hızlı Ayarlama Kılavuzu
 
-**Drone çok yaklaşıp geri çekiliyor (salınım):**
-→ `kp` düşür veya `kd` artır
+**Drone salınım yapıyor (çok yaklaşıp uzaklaşıyor):**
+→ `kp` düşür (0.4→0.2) veya `approach_accel_cms2` düşür
 
-**Drone hedefi takip edemeyip geri kalıyor:**
-→ `kp` artır veya `max_speed_cms` artır
+**Drone geri kalıyor, yetişemiyor:**
+→ `kp` artır (0.4→0.6) veya `max_speed_cms` artır
 
 **Drone yavaş yavaş yaklaşıp uzaklaşıyor (drift):**
-→ `ki` küçük artır
+→ `ki` küçük artır (0.02→0.05)
 
 **Mesafe doğruyken hız çok fazla/az:**
-→ İç hız döngüsü gainlerini ayarla (`outer_pid.speed` → `pid_params.yaml`)
+→ İç hız döngüsünü ayarla: `outer_pid.speed.kp` (`pid_params.yaml`)
 
 ---
 
