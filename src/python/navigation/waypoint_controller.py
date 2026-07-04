@@ -1,9 +1,8 @@
-
 import math
 
 
 class WaypointController:
-    def __init__(self, intercept_time=0.3, camera_tilt=0.0,
+    def __init__(self, intercept_time=0.3, camera_tilt=25.0,
                  adaptive_lead=True, lead_min=0.1, lead_max=0.8,
                  use_intercept=True, max_lead=1.2, smooth_a=0.15):
 
@@ -25,7 +24,6 @@ class WaypointController:
             return self.intercept_time
         t = dist_3d / closing_speed          # kabaca temas suresi (s)
         t = max(self.lead_min, min(self.lead_max, t))
-        # yakin mesafe sonumlemesi: 4000cm altinda lead'i lineer kis
         if dist_3d < 4000.0:
             t *= max(0.0, dist_3d / 4000.0)
         return t
@@ -39,7 +37,7 @@ class WaypointController:
         b = 2.0 * (rx*tvx + ry*tvy + rz*tvz)
         c = rx*rx + ry*ry + rz*rz
 
-        if abs(a) < 1e-6:                 # drone hizi ~ hedef hizi: lineer cozum
+        if abs(a) < 1e-6:                
             if abs(b) < 1e-6:
                 return None
             t = -c / b
@@ -47,7 +45,7 @@ class WaypointController:
 
         disc = b*b - 4*a*c
         if disc < 0:
-            return None                    # gercek kesisim yok
+            return None                   
         sq = math.sqrt(disc)
         t1 = (-b + sq) / (2*a)
         t2 = (-b - sq) / (2*a)
@@ -94,7 +92,7 @@ class WaypointController:
         if self._t_use_smooth is None:
             self._t_use_smooth = t_use
         else:
-            a = 0.08   # cok dusuk = cok yumusak (yaw/pitch titremesini azaltir)
+            a = 0.08   
             self._t_use_smooth = (1 - a) * self._t_use_smooth + a * t_use
         t_use = self._t_use_smooth
         t_lead = t_use

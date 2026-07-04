@@ -1,9 +1,4 @@
-"""
-Flight mode manager for switching between Kalkış, Seyir, and Takip modes.
-"""
 
-
-# mode_manager.py
 class ModeManager:
     def __init__(self, config):
         self.state = "KALKIS"
@@ -15,8 +10,9 @@ class ModeManager:
 
         t = self.config["thresholds"]
 
+        angajman_dist = t.get("angajman_dist", 4500.0)
+
         if self.state == "KALKIS":
-            # Transition once altitude is roughly matched (no speed gate — pitch is 0 during climb)
             if abs(dz) < t["seyir_dz"]:
                 self.state = "SEYIR"
 
@@ -25,9 +21,21 @@ class ModeManager:
                 self.state = "TAKIP"
 
         elif self.state == "TAKIP":
-            # Fly slightly faster than target to close distance, then hold position
             target_speed_cmd = safe_target_speed + self.config["flight"]["takip_speed_margin"]
             if dist_3d > t["seyir_fallback_dist"]:
                 self.state = "SEYIR"
+  
+            elif 0.0 < dist_3d < angajman_dist:
+                self.state = "ANGAJMAN"
+
+        elif self.state == "ANGAJMAN":
+
+            engagement_margin = self.config["flight"].get(
+                "angajman_speed_margin",
+                self.config["flight"]["takip_speed_margin"] * 2.0,
+            )
+            target_speed_cmd = safe_target_speed + engagement_margin
+            if dist_3d > angajman_dist * 1.3:
+                self.state = "TAKIP"
 
         return self.state, target_speed_cmd

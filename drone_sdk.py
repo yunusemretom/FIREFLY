@@ -1,6 +1,6 @@
 """
 ================================================================================
-DRONE OF WAR - COMPETITION SDK (v2.1)
+DRONE OF WAR - COMPETITION SDK (v2.2)
 ================================================================================
 Bu dosya, Unreal Engine tabanlı Drone Of War oyunu ile Python arasındaki 
 TCP iletişimini sağlayan resmi SDK dosyasıdır. 
@@ -9,6 +9,11 @@ YARIŞMACI NOTU:
 Sadece bu dosyayı projenize import ederek dronunuzu kontrol edebilirsiniz.
 Kendi AI mantığınızı, bu SDK'daki 'get_' fonksiyonları ile telemetri alıp,
 'set_' fonksiyonları ile dronu yönlendirerek kurmalısınız.
+
+Platform sabitleri (oyun içine gömülü, değiştirilemez):
+    * Kamera: 25° yukarı tilt, 125° FOV
+    * Hedef Talon İHA: kanat açıklığı 1718 mm, gövde uzunluğu 1100 mm
+    * Hedef GPS telemetrisi: en fazla 1 Hz (saniyede 1 güncelleme)
 
 Örnek Kullanım:
     import drone_sdk as drone
@@ -47,7 +52,7 @@ CORRUPTION_FLAGS = [
     (FLAG_OFFSET,     "Sabit offset (kayma)"),
     (FLAG_JUMP,       "Ani ziplama (spike)"),
     (FLAG_DROPOUT,    "Veri kesintisi (dropout)"),
-    (FLAG_RATELIMIT,  "Guncelleme hizi siniri (orn. 1 Hz)"),
+    (FLAG_RATELIMIT,  "Guncelleme hizi siniri (max 1 Hz)"),
     (FLAG_DELAY,      "Gecikmeli veri"),
 ]
 
@@ -188,7 +193,7 @@ class _DroneInternal:
                     line, buffer = buffer.split("\n", 1)
                     if line: self._parse_telemetry(line)
             except socket.timeout:
-                # Telemetri 1 Hz'e kadar yavaş olabilir veya geçici olarak kesilebilir (GPS dropout).
+                # Hedef GPS telemetrisi 1 Hz'e kadar yavaş olabilir veya geçici olarak kesilebilir (dropout).
                 # Bu durumda bağlantıyı KOPARMA; en son bilinen telemetri korunur, beklemeye devam et.
                 continue
             except Exception:
@@ -351,7 +356,8 @@ def get_active_corruption():
 
 # --- ÖNEMLİ NOT (GERÇEKÇİ SENSÖR DAVRANIŞI) ------------------------------------
 # Telemetri verisi gerçek bir GPS/sensör gibi davranabilir:
-#   * Veri saniyede yalnızca birkaç kez (örn. 1 Hz) güncellenebilir.
+#   * Hedef (Talon) konum/hız telemetrisi en fazla 1 Hz güncellenir.
+#   * Kendi dron telemetrisi tam hızda ve temiz gelir.
 #   * Konum/hız değerleri bir miktar gürültü, sabit kayma veya ani sıçrama içerebilir.
 #   * Veri kısa süreliğine kesilebilir; bu sırada 'get_' fonksiyonları SON bilinen
 #     değeri döndürmeye devam eder (bağlantı kopmaz).

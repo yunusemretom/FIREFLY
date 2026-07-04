@@ -1,33 +1,42 @@
-
 import numpy as np
 
 
 class EKF:
     def __init__(self,
-                 sigma_a=1500.0,          
-                 r_pos=2500.0,            
-                 chi2_threshold=16.27,   
-                 dt_nominal=0.05,        
-                 dt_max=1.5):            
+                 sigma_a=1500.0,
+                 r_pos=2500.0,
+                 chi2_threshold=16.27,
+                 dt_nominal=0.05,
+                 dt_max=1.5,
+                 max_speed=2500.0,
+                 r_scale_max=25.0,
+                 r_scale_growth=1.6,
+                 r_scale_decay=0.85):
         self.sigma_a2 = float(sigma_a) ** 2
         self.chi2_threshold = chi2_threshold
         self.dt_nominal = dt_nominal
         self.dt_max = dt_max
+        self.max_speed = float(max_speed)  # cm/s, Talon icin guvenli hiz siniri
 
         self.x = np.zeros((6, 1))
-        self.P = np.eye(6) * 1.0e6        
+        self.P = np.eye(6) * 1.0e6
 
         self.H = np.zeros((3, 6))
         self.H[0, 0] = self.H[1, 1] = self.H[2, 2] = 1.0
         self.R = np.eye(3) * r_pos
 
         self.initialized = False
-        self._init_buf = []            
+        self._init_buf = []
         self._init_n = 4
-        self._fake_t = 0.0              
+        self._fake_t = 0.0
         self._reject_streak = 0
-        self._reject_buf = []          
-        self._reject_reset = 4          
+        self._reject_buf = []
+        self._reject_reset = 4
+
+        self._r_scale = 1.0
+        self.r_scale_max = r_scale_max
+        self.r_scale_growth = r_scale_growth
+        self.r_scale_decay = r_scale_decay
 
     def _F(self, dt):
         F = np.eye(6)
@@ -54,10 +63,17 @@ class EKF:
         self.P = np.diag([400.0, 400.0, 400.0, 1.0e6, 1.0e6, 1.0e6])
         self.initialized = True
 
+    def _limit_velocity(self):
+        v = self.x[3:6, 0]
+        spd = float(np.linalg.norm(v))
+        if spd > self.max_speed:
+            self.x[3:6, 0] = (v / spd) * self.max_speed
+
     def predict(self, dt):
         dt = max(1e-3, min(dt, self.dt_max))     # clamp
         F = self._F(dt)
         self.x = F @ self.x
+        self._limit_velocity()
         self.P = F @ self.P @ F.T + self._Q(dt)
         return self.get_position()
 
@@ -80,15 +96,13 @@ class EKF:
             t_early = np.median(times[:half])
             t_late = np.median(times[half:])
 
-
             total_span = times[-1] - times[0]
-            min_span = max(0.05, total_span * 0.4)    
+            min_span = max(0.05, total_span * 0.4)
             span = max(min_span, t_late - t_early)
             v0 = (p_late - p_early) / span
 
-
             speed0 = float(np.linalg.norm(v0))
-            VMAX = 5000.0
+            VMAX = self.max_speed
             if speed0 > VMAX:
                 v0 = v0 * (VMAX / speed0)
             self.initialize(tuple(p0), tuple(v0))
@@ -96,30 +110,44 @@ class EKF:
 
         z = np.array(pos, dtype=float).reshape(3, 1)
         y = z - self.H @ self.x                  # innovation
-        S = self.H @ self.P @ self.H.T + self.R
+
+        R_eff = self.R * self._r_scale
+        S = self.H @ self.P @ self.H.T + R_eff
 
         d2 = float((y.T @ np.linalg.inv(S) @ y).item())
         if d2 > self.chi2_threshold:
             self._reject_streak += 1
             self._reject_buf.append(pos)
 
+            self._r_scale = min(self.r_scale_max, self._r_scale * self.r_scale_growth)
+
             if self._reject_streak >= self._reject_reset:
                 arr = np.array(self._reject_buf, dtype=float)
                 p0 = np.median(arr, axis=0)
-                v_keep = self.get_velocity()      # mevcut hizi koru
-                self.initialize(tuple(p0), v_keep)
+
+                cur_pos = np.array(self.get_position())
+                blended = 0.5 * cur_pos + 0.5 * p0        # yari yola git
+
+
+                self.x[0, 0], self.x[1, 0], self.x[2, 0] = blended
+                self.P[0, 0] *= 4; self.P[1, 1] *= 4; self.P[2, 2] *= 4
+
                 self._reject_streak = 0
                 self._reject_buf = []
+                self._r_scale = max(self._r_scale, 4.0)
                 return True
             return False
 
         self._reject_streak = 0
         self._reject_buf = []
+        self._r_scale = max(1.0, self._r_scale * self.r_scale_decay)
+
         K = self.P @ self.H.T @ np.linalg.inv(S)
         self.x = self.x + K @ y
+        self._limit_velocity()
         I = np.eye(6)
         # Joseph formu: sayisal olarak kararli, P simetrik+pozitif kalir
-        self.P = (I - K @ self.H) @ self.P @ (I - K @ self.H).T + K @ self.R @ K.T
+        self.P = (I - K @ self.H) @ self.P @ (I - K @ self.H).T + K @ R_eff @ K.T
         return True
 
     def step(self, pos, dt=None, t_now=None):
@@ -145,7 +173,17 @@ class EKF:
     def position_uncertainty(self):
         return float(np.sqrt(self.P[0, 0] + self.P[1, 1] + self.P[2, 2]))
 
-    def predict_future(self, t_ahead):
+    def predict_future(self, t_ahead, max_ahead=5.0):
+
+        t_ahead = max(0.0, min(float(t_ahead), max_ahead))
+
         px, py, pz = self.get_position()
         vx, vy, vz = self.get_velocity()
+        spd = float(np.sqrt(vx * vx + vy * vy + vz * vz))
+        if spd > self.max_speed:
+            scale = self.max_speed / spd
+            vx *= scale
+            vy *= scale
+            vz *= scale
+
         return (px + vx * t_ahead, py + vy * t_ahead, pz + vz * t_ahead)

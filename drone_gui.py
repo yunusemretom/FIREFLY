@@ -4,11 +4,27 @@ import drone_sdk as drone
 import threading
 import time
 import math
+import json
 import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "src", "python", "navigation"))
 from nav_integration import NavigationSystem
+
+
+def _atomic_write(path, text):
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as _f:
+        _f.write(text)
+    os.replace(tmp_path, path)
+
+
+CONTROL_DT = 0.02          # 50 Hz kontrol dongusu
+CAMERA_TILT_DEG = 25.0     # Sim v0.0.4 / SDK: kamera 25 derece yukari
+VISION_FOV_DEG = 125.0     # Sim v0.0.4 / SDK: kamera FOV 125 derece
+VISION_LOST_TIMEOUT_S = 1.0
+VISION_CONF_MIN = 0.35
+VISION_FILE = "/tmp/firefly_vision.json"
 
 
 class DroneGUI:
@@ -26,6 +42,9 @@ class DroneGUI:
         self.last_gps_ok = True
 
         self.PITCH_SIGN = -1.0
+
+        self.track_mode = "GPS_INTERCEPT"
+        self.vision_lost_t = 0.0
 
         self.style = ttk.Style()
         self.style.theme_use("clam")
@@ -67,7 +86,6 @@ class DroneGUI:
         )
         self.connect_btn.pack(pady=5)
 
-        # Update Loop
         self.running = True
         self.update_thread = threading.Thread(target=self.control_loop, daemon=True)
         self.update_thread.start()
@@ -285,7 +303,102 @@ class DroneGUI:
                 except Exception:
                     pass
                 print(f"[loop uyari] {e}")
-            time.sleep(0.05)
+            time.sleep(CONTROL_DT)
+
+    def _clamp(self, value, lo=-1.0, hi=1.0):
+        return max(lo, min(hi, float(value)))
+
+    def get_vision_target(self):
+        """
+        VISION_TRACK icin kamera/bbox girisi.
+
+        Bu fonksiyon bilerek GPS hedef verisi okumaz. Varsayilan durumda hedef yok
+        doner; boylece goruntu isleme bagli degilken sistem GPS_INTERCEPT modunda
+        normal calisir.
+
+        Kendi vision kodunu kolay baglamak icin opsiyonel dosya arayuzu:
+          /tmp/firefly_vision.json
+
+        Ornek JSON:
+          {"visible": true, "cx": 640, "cy": 360, "w": 1280, "h": 720,
+           "conf": 0.82, "timestamp": 1710000000.0}
+
+        Alternatif bbox formati da kabul edilir:
+          {"visible": true, "bbox": [x, y, bw, bh], "w": 1280, "h": 720,
+           "conf": 0.82, "timestamp": 1710000000.0}
+        """
+        default = {
+            "visible": False,
+            "cx": 0.0,
+            "cy": 0.0,
+            "w": 1280.0,
+            "h": 720.0,
+            "conf": 0.0,
+        }
+
+        try:
+            if not os.path.exists(VISION_FILE):
+                return default
+            with open(VISION_FILE, "r") as f:
+                data = json.load(f)
+
+            conf = float(data.get("conf", 0.0))
+            visible = bool(data.get("visible", False)) and conf >= VISION_CONF_MIN
+
+            ts = data.get("timestamp", None)
+            if ts is not None and (time.time() - float(ts)) > 0.5:
+                visible = False
+
+            img_w = float(data.get("w", data.get("image_w", 1280.0)))
+            img_h = float(data.get("h", data.get("image_h", 720.0)))
+
+            if "bbox" in data:
+                x, y, bw, bh = data["bbox"][:4]
+                cx = float(x) + float(bw) / 2.0
+                cy = float(y) + float(bh) / 2.0
+            else:
+                cx = float(data.get("cx", img_w / 2.0))
+                cy = float(data.get("cy", img_h / 2.0))
+
+            return {
+                "visible": visible,
+                "cx": cx,
+                "cy": cy,
+                "w": img_w,
+                "h": img_h,
+                "conf": conf,
+            }
+        except Exception:
+            return default
+
+    def _vision_track_control(self, vision, d_rot):
+
+        img_w = max(1.0, float(vision.get("w", 1280.0)))
+        img_h = max(1.0, float(vision.get("h", 720.0)))
+        cx = float(vision.get("cx", img_w / 2.0))
+        cy = float(vision.get("cy", img_h / 2.0))
+
+        err_x = (cx - img_w / 2.0) / (img_w / 2.0)
+        err_y = (cy - img_h / 2.0) / (img_h / 2.0)
+
+        yaw_cmd = self._clamp(0.85 * err_x)
+        pitch_cmd = self._clamp(-0.65 * err_y)
+
+        throttle_cmd = 0.0
+
+        bank = self._clamp(yaw_cmd * 0.25, -0.25, 0.25)
+        level = self._clamp(-float(d_rot[0]) * 0.12, -0.25, 0.25)
+        roll_cmd = self._clamp(bank + level)
+
+        drone.set_control_surfaces(throttle_cmd, pitch_cmd, roll_cmd, yaw_cmd, True)
+
+        self.yaw_slider.set(yaw_cmd)
+        self.pitch_slider.set(pitch_cmd)
+        self.roll_slider.set(roll_cmd)
+        self.throttle_slider.set(throttle_cmd)
+        self.arm_var.set(1)
+
+        return yaw_cmd, pitch_cmd, roll_cmd, throttle_cmd
 
     def _loop_iteration(self, KP_YAW, KP_PITCH, KP_THR, BASE_HOVER_THR):
             if drone.is_connected():
@@ -294,36 +407,64 @@ class DroneGUI:
                     d_rot = t["drone"]["rotation"]
                     d_speed = t["drone"]["speed"]
 
-                    nav_out = self.nav.process(t)
-                    dx = nav_out["dx"]
-                    dy = nav_out["dy"]
-                    dz = nav_out["dz"]
-                    dist_3d = nav_out["dist_3d"]
-                    dist_2d = nav_out["dist_2d"]
-                    tar_speed = nav_out["target_speed"]      # EKF'ten gercek hedef hizi
-                    self.last_tar_speed = tar_speed
-                    self.last_gps_ok = nav_out["gps_ok"]
+                    # VISION_TRACK kararini GPS hedef verisiyle degil, sadece kamera/bbox ile ver.
+                    vision = self.get_vision_target()
+                    if vision["visible"]:
+                        self.track_mode = "VISION_TRACK"
+                        self.vision_lost_t = 0.0
+                    elif self.track_mode == "VISION_TRACK":
+                        self.vision_lost_t += CONTROL_DT
+                        if self.vision_lost_t > VISION_LOST_TIMEOUT_S:
+                            self.track_mode = "GPS_INTERCEPT"
 
-                    try:
-                        ham = t["target"]["position"]
-                        wp = nav_out["waypoint"]
-                        _gy = math.degrees(math.atan2(dy, dx))   # gereken yaw
-                        _ye = _gy - d_rot[2]                      # yaw hatasi
-                        while _ye > 180: _ye -= 360
-                        while _ye < -180: _ye += 360
-                        _gp = math.degrees(math.atan2(dz, dist_2d if dist_2d > 1e-6 else 1e-6))
-                        _pe = _gp - d_rot[1]                      # pitch hatasi
-                        _truth = drone.get_debug_truth()
-                        _ham_err = _ekf_err = -1.0
-                        _corr = ""
-                        if _truth.get("available"):
-                            _g = _truth["target"]["position"]
-                            _ham_err = math.dist(ham[:2], _g[:2])
-                            _tp = nav_out.get("target_pos", wp)
-                            _ekf_err = math.dist(_tp[:2], _g[:2])
-                            _corr = " | ".join(drone.get_active_corruption())
-                        with open("/tmp/firefly_ekf.txt", "w") as _f:
-                            _f.write(
+                    if self.track_mode == "VISION_TRACK":
+                        self.status_var.set("VISION TRACK - GPS TARGET NOT USED")
+                        self.status_label.config(fg="#00AAFF")
+                        self.last_gps_ok = False
+                        self._vision_track_control(vision, d_rot)
+                        try:
+                            _atomic_write(
+                                "/tmp/firefly_ekf.txt",
+                                f"{time.time():.2f}\tVISION_TRACK\t"
+                                f"GPS_TARGET_NOT_USED\t"
+                                f"bbox_cx={vision['cx']:.1f}\t"
+                                f"bbox_cy={vision['cy']:.1f}\t"
+                                f"conf={vision['conf']:.2f}"
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        nav_out = self.nav.process(t)
+                        dx = nav_out["dx"]
+                        dy = nav_out["dy"]
+                        dz = nav_out["dz"]
+                        dist_3d = nav_out["dist_3d"]
+                        dist_2d = nav_out["dist_2d"]
+                        tar_speed = nav_out["target_speed"]      # EKF'ten gercek hedef hizi
+                        self.last_tar_speed = tar_speed
+                        self.last_gps_ok = nav_out["gps_ok"]
+
+                        try:
+                            ham = t["target"]["position"]
+                            wp = nav_out["waypoint"]
+                            _gy = math.degrees(math.atan2(dy, dx))   # gereken yaw
+                            _ye = _gy - d_rot[2]                      # yaw hatasi
+                            while _ye > 180: _ye -= 360
+                            while _ye < -180: _ye += 360
+                            _gp = math.degrees(math.atan2(dz, dist_2d if dist_2d > 1e-6 else 1e-6))
+                            _pe = _gp - d_rot[1]                      # pitch hatasi
+                            _truth = drone.get_debug_truth()
+                            _ham_err = _ekf_err = -1.0
+                            _corr = ""
+                            if _truth.get("available"):
+                                _g = _truth["target"]["position"]
+                                _ham_err = math.dist(ham[:2], _g[:2])
+                                # Dogruluk hesabinda ileri tahmin/lead degil, EKF'nin anlik filtreli konumu kullanilmali.
+                                _tp = nav_out.get("target_ekf_pos", nav_out.get("target_pos", wp))
+                                _ekf_err = math.dist(_tp[:2], _g[:2])
+                                _corr = " | ".join(drone.get_active_corruption())
+                            _atomic_write(
+                                "/tmp/firefly_ekf.txt",
                                 f"{time.time():.2f}\t"
                                 f"{ham[0]:.1f}\t{ham[1]:.1f}\t{ham[2]:.1f}\t"
                                 f"{wp[0]:.1f}\t{wp[1]:.1f}\t{wp[2]:.1f}\t"
@@ -334,98 +475,92 @@ class DroneGUI:
                                 f"{_ye:.1f}\t{_pe:.1f}\t{d_rot[1]:.1f}\t{d_rot[2]:.1f}\t"
                                 f"{_ham_err:.1f}\t{_ekf_err:.1f}\t{_corr}"
                             )
-                    except Exception:
-                        pass
+                        except Exception:
+                            pass
 
-                    if nav_out["gps_ok"]:
-                        self.status_var.set("TARGET LOCKED - ATTACKING")
-                        self.status_label.config(fg="#00FF41")
-                    else:
-                        self.status_var.set("GPS LOST - EKF DEAD RECKONING")
-                        self.status_label.config(fg="#FFAA00")
+                        if nav_out["gps_ok"]:
+                            self.status_var.set("TARGET LOCKED - ATTACKING")
+                            self.status_label.config(fg="#00FF41")
+                        else:
+                            self.status_var.set("GPS LOST - EKF DEAD RECKONING")
+                            self.status_label.config(fg="#FFAA00")
 
-                    proximity_scale = min(1.0, dist_3d / 6000.0)
+                        proximity_scale = min(1.0, dist_3d / 6000.0)
 
-                    target_yaw = math.degrees(math.atan2(dy, dx))
-                    yaw_error = target_yaw - d_rot[2]
-                    while yaw_error > 180:
-                        yaw_error -= 360
-                    while yaw_error < -180:
-                        yaw_error += 360
-                    final_yaw = yaw_error * KP_YAW
-                    self._yaw_smooth = getattr(self, "_yaw_smooth", 0.0)
-                    self._yaw_smooth = 0.7 * self._yaw_smooth + 0.3 * final_yaw
-                    final_yaw = self._yaw_smooth
+                        target_yaw = math.degrees(math.atan2(dy, dx))
+                        yaw_error = target_yaw - d_rot[2]
+                        while yaw_error > 180:
+                            yaw_error -= 360
+                        while yaw_error < -180:
+                            yaw_error += 360
+                        final_yaw = yaw_error * KP_YAW
+                        self._yaw_smooth = getattr(self, "_yaw_smooth", 0.0)
+                        self._yaw_smooth = 0.7 * self._yaw_smooth + 0.3 * final_yaw
+                        final_yaw = self._yaw_smooth
 
-                    CAMERA_TILT = 0.0
-                    target_pitch_world = math.degrees(math.atan2(dz, dist_2d if dist_2d > 1e-6 else 1e-6))
-                    lock_pitch = target_pitch_world - CAMERA_TILT
+                        CAMERA_TILT = CAMERA_TILT_DEG
+                        target_pitch_world = math.degrees(math.atan2(dz, dist_2d if dist_2d > 1e-6 else 1e-6))
+                        lock_pitch = target_pitch_world - CAMERA_TILT
 
-                    PHASE2_START = 4500.0
-                    max_allowed_thr = self.max_throttle_slider.get()
+                        PHASE2_START = 4500.0
+                        max_allowed_thr = self.max_throttle_slider.get()
 
-                    DIVE_OFFSET = -25.0
+                        DIVE_OFFSET = -25.0
 
-                    match_target_thr = (BASE_HOVER_THR * 0.92) + (tar_speed / 3800.0)
+                        match_target_thr = (BASE_HOVER_THR * 0.92) + (tar_speed / 3800.0)
 
-                    alt_correction = dz * 0.0015
-                    match_target_thr += alt_correction
+                        alt_correction = dz * 0.0015
+                        match_target_thr += alt_correction
 
-                    if dist_3d > PHASE2_START:
+                        if dist_3d > PHASE2_START:
 
-                        target_pitch_drone = lock_pitch + DIVE_OFFSET
+                            target_pitch_drone = lock_pitch + DIVE_OFFSET
 
-                        final_thr = min(match_target_thr + 0.24, max_allowed_thr)
-                    else:
+                            final_thr = min(match_target_thr + 0.24, max_allowed_thr)
+                        else:
 
-                        local_scale = max(0.0, dist_3d / PHASE2_START)
+                            local_scale = max(0.0, dist_3d / PHASE2_START)
 
-                        flare_trigger_scale = min(
-                            1.0, dist_3d / 1000.0
-                        )  # 10m altında 0.0'a yaklaşır
-                        flare_effect = (
-                            1.0 - flare_trigger_scale
-                        ) * 15.0  # Son 10m'de burnu kaldır
+                            flare_trigger_scale = min(
+                                1.0, dist_3d / 1000.0
+                            )  # 10m altında 0.0'a yaklaşır
+                            flare_effect = (
+                                1.0 - flare_trigger_scale
+                            ) * 15.0  # Son 10m'de burnu kaldır
 
-                        target_pitch_drone = (
-                            lock_pitch + (DIVE_OFFSET * local_scale) + flare_effect
-                        )
+                            target_pitch_drone = (
+                                lock_pitch + (DIVE_OFFSET * local_scale) + flare_effect
+                            )
 
-                        approach_buffer = 0.22 * local_scale
-                        final_thr = match_target_thr + approach_buffer
+                            approach_buffer = 0.22 * local_scale
+                            final_thr = match_target_thr + approach_buffer
 
-                    speed_gap = max(0.0, tar_speed - d_speed)
-                    final_thr += min(0.42, speed_gap / 3200.0)
+                        speed_gap = max(0.0, tar_speed - d_speed)
+                        final_thr += min(0.42, speed_gap / 3200.0)
 
-                    final_thr = min(max_allowed_thr, final_thr)
+                        final_thr = min(max_allowed_thr, final_thr)
 
-                    pitch_error = target_pitch_drone - d_rot[1]
-                    final_pitch = self.PITCH_SIGN * pitch_error * KP_PITCH
+                        pitch_error = target_pitch_drone - d_rot[1]
+                        final_pitch = self.PITCH_SIGN * pitch_error * KP_PITCH
 
-                    bank = max(-0.3, min(0.3, yaw_error * 0.012))   # donuse yaslan
-                    level = -d_rot[0] * 0.15                         # yataya donme egilimi
-                    final_roll = bank + level
-                    self._roll_smooth = getattr(self, "_roll_smooth", 0.0)
-                    self._roll_smooth = 0.75 * self._roll_smooth + 0.25 * final_roll
-                    final_roll = self._roll_smooth
+                        bank = max(-0.3, min(0.3, yaw_error * 0.012))   # donuse yaslan
+                        level = -d_rot[0] * 0.15                         # yataya donme egilimi
+                        final_roll = bank + level
+                        self._roll_smooth = getattr(self, "_roll_smooth", 0.0)
+                        self._roll_smooth = 0.75 * self._roll_smooth + 0.25 * final_roll
+                        final_roll = self._roll_smooth
 
-                    fy = max(-1.0, min(1.0, final_yaw))
-                    fp = max(-1.0, min(1.0, final_pitch))
-                    fr = max(-1.0, min(1.0, final_roll))
-                    drone.set_yaw(fy)
-                    drone.set_pitch(fp)
-                    drone.set_throttle(
-                        max(-0.8, min(self.max_throttle_slider.get(), final_thr))
-                    )
-                    drone.set_roll(fr)
-                    drone.set_arm(True)
+                        fy = max(-1.0, min(1.0, final_yaw))
+                        fp = max(-1.0, min(1.0, final_pitch))
+                        fr = max(-1.0, min(1.0, final_roll))
+                        thr_cmd = max(-0.8, min(self.max_throttle_slider.get(), final_thr))
 
-                    self.yaw_slider.set(fy)
-                    self.pitch_slider.set(fp)
-                    self.throttle_slider.set(
-                        max(-0.8, min(self.max_throttle_slider.get(), final_thr))
-                    )
-                    self.arm_var.set(1)
+                        drone.set_control_surfaces(thr_cmd, fp, fr, fy, True)
+
+                        self.yaw_slider.set(fy)
+                        self.pitch_slider.set(fp)
+                        self.throttle_slider.set(thr_cmd)
+                        self.arm_var.set(1)
                 else:
                     self.kamikaze_state = "READY"
                     if drone.is_connected():
@@ -452,17 +587,21 @@ class DroneGUI:
                 )
                 self.telemetry_labels["DRONE SPEED"].set(f"{d['speed']:.2f} cm/s")
                 self.telemetry_labels["ALTITUDE"].set(f"{d['altitude']:.2f} cm")
-                self.telemetry_labels["TARGET POS"].set(
-                    f"{tar['position'][0]:.1f}, {tar['position'][1]:.1f}, {tar['position'][2]:.1f}"
-                )
-                if self.auto_mode_var.get():
-                    self.telemetry_labels["TARGET SPEED"].set(
-                        f"{self.last_tar_speed:.2f} cm/s (EKF)"
-                    )
+                if self.auto_mode_var.get() and self.track_mode == "VISION_TRACK":
+                    self.telemetry_labels["TARGET POS"].set("GPS TARGET NOT USED")
+                    self.telemetry_labels["TARGET SPEED"].set("VISION/BBOX MODE")
                 else:
-                    self.telemetry_labels["TARGET SPEED"].set(
-                        f"{tar.get('speed', 0.0):.2f} cm/s"
+                    self.telemetry_labels["TARGET POS"].set(
+                        f"{tar['position'][0]:.1f}, {tar['position'][1]:.1f}, {tar['position'][2]:.1f}"
                     )
+                    if self.auto_mode_var.get():
+                        self.telemetry_labels["TARGET SPEED"].set(
+                            f"{self.last_tar_speed:.2f} cm/s (EKF)"
+                        )
+                    else:
+                        self.telemetry_labels["TARGET SPEED"].set(
+                            f"{tar.get('speed', 0.0):.2f} cm/s"
+                        )
             else:
 
                 self.status_var.set("LINK LOST - RECONNECTING...")

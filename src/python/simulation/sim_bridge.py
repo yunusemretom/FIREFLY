@@ -1,8 +1,3 @@
-"""
-Bridge connecting Python backend to Gazebo/ROS2 simulator environments.
-"""
-
-# src/python/simulation/sim_bridge.py
 
 import time
 import math
@@ -22,6 +17,8 @@ from src.python.guidance.pid_throttle import ThrottleController
 from src.python.guidance.pid_yaw import YawController
 from src.python.guidance.pid_core import clamp
 
+from src.python.navigation.nav_integration import NavigationSystem
+
 
 def load_config():
     with open("config/pid_params.yaml", "r", encoding="utf-8") as f:
@@ -36,51 +33,95 @@ def run_simulation():
     throttle_ctrl = ThrottleController(config)
     yaw_ctrl = YawController(config)
 
-    drone.connect()
+    nav = NavigationSystem(corrupt_for_test=False)
+
+    connected = drone.connect()
+    print(f"[TANI] drone.connect() sonucu: {connected}")
+    print(f"[TANI] drone.is_connected(): {drone.is_connected()}")
+    if not connected or not drone.is_connected():
+        print(
+            "\n[!] OYUNA BAGLANILAMADI. Kontrol et:\n"
+            "    1) DronesOfWar.exe (oyun) acik mi?\n"
+            "    2) BASKA BIR SCRIPT (ornegin drone_gui.py) su an ayni porta "
+            "(127.0.0.1:12345) BAGLI DEGIL mi? Ayni anda ikisi calisamaz - "
+            "birini kapat.\n"
+        )
+        return
     time.sleep(0.5)
+
+    print("[TANI] Ilk telemetri ornekleri (1.5s):")
+    _t0 = time.time()
+    while time.time() - _t0 < 1.5:
+        _tel = drone.get_telemetry()
+        print(f"    drone_pos={_tel['drone']['position']}  target_pos={_tel['target']['position']}")
+        time.sleep(0.3)
+
     drone.set_arm(True)
 
     print("=" * 60)
-    print("  AVCI DRONE - TAKİP SİMÜLASYONU BAŞLADI")
+    print("  AVCI DRONE - TAKİP SİMÜLASYONU BAŞLADI (EKF entegre)")
     print("=" * 60)
 
     loop_time = time.time()
 
     try:
         while True:
-            # Measure real elapsed time instead of using fixed dt
             now = time.time()
             dt = now - loop_time
             loop_time = now
             dt = max(0.01, min(0.1, dt))
 
-            # A) Telemetriyi Oku
             tel = drone.get_telemetry()
             drone_pos = tel["drone"]["position"]
             drone_rot = tel["drone"]["rotation"]
             drone_speed = tel["drone"]["speed"]
-            target_pos = tel["target"]["position"]
-            target_speed = tel["target"]["speed"]
+            raw_target_pos = tel["target"]["position"]
 
-            if target_pos[0] == 0.0 and drone_pos[0] == 0.0:
+            if raw_target_pos[0] == 0.0 and drone_pos[0] == 0.0:
                 time.sleep(0.02)
                 continue
 
-            # B) Geometriyi Hesapla
-            dx = target_pos[0] - drone_pos[0]
-            dy = target_pos[1] - drone_pos[1]
-            dz = target_pos[2] - drone_pos[2]
 
-            dist_2d = math.sqrt(dx**2 + dy**2)
-            dist_3d = math.sqrt(dx**2 + dy**2 + dz**2)
+            if raw_target_pos == [0.0, 0.0, 0.0] or tuple(raw_target_pos) == (0.0, 0.0, 0.0):
+                print("  (!) Hedef telemetrisi (0,0,0) - oyun/GPS baglantisini kontrol et")
+                time.sleep(0.1)
+                continue
+
+            nav_out = nav.process(tel)
+
+            dx = nav_out["dx"]
+            dy = nav_out["dy"]
+            dz = nav_out["dz"]
+            dist_2d = nav_out["dist_2d"]
+            dist_3d = nav_out["dist_3d"]
+            target_speed = nav_out["target_speed"]
             target_elevation = math.degrees(math.atan2(dz, max(dist_2d, 1.0)))
 
-            # C) Kontrol Kararları
+            gps_ok = nav_out["gps_ok"]
 
-            # 1. Yaw: hedefe dön
+
+            if not gps_ok or not nav.target_ekf.initialized:
+                state = "KALKIS_BEKLEME"
+                target_throttle = clamp(config["flight"]["base_throttle"] + 0.15, -1.0, 1.0)  # yavas, guvenli tirmanma
+                pitch_cmd = 0.0
+                yaw_cmd = 0.0
+                roll_cmd = 0.0
+                smooth_desired_pitch = 0.0
+                yaw_error = 0.0
+
+                drone.set_control_surfaces(
+                    clamp(target_throttle, -1.0, 1.0), 0.0, 0.0, 0.0, True,
+                )
+                print(
+                    f"[{state}][!GPS!] EKF isinmadi, guvenli hover komutu gonderiliyor "
+                    f"(target_ekf.initialized={nav.target_ekf.initialized})"
+                )
+                time.sleep(max(0.0, config["flight"]["dt"] - dt))
+                continue
+
+
             yaw_error, yaw_cmd = yaw_ctrl.calculate(dx, dy, drone_rot[2], dt)
 
-            # 2. Durum güncelle
             state, target_speed_cmd = mode_mgr.update(
                 dist_3d=dist_3d,
                 dz=dz,
@@ -90,7 +131,6 @@ def run_simulation():
                 dt=dt,
             )
 
-            # 3. Pitch: hedefe dönüklük oranında ileri eğim uygula (yaw hizasıyla scale edilir)
             smooth_desired_pitch, pitch_cmd = pitch_ctrl.calculate(
                 state=state,
                 target_speed_cmd=target_speed_cmd,
@@ -101,13 +141,10 @@ def run_simulation():
                 dt=dt,
             )
 
-            # 4. Throttle: irtifa koru (0=hover, SDK [-1,1])
             target_throttle = throttle_ctrl.calculate(dz=dz, dt=dt)
 
-            # 5. Roll: angle mode FC seviyede tutar, 0 gönder
             roll_cmd = 0.0
 
-            # D) Komut Gönder
             drone.set_control_surfaces(
                 clamp(target_throttle, -1.0, 1.0),
                 -clamp(pitch_cmd, -1.0, 1.0),
@@ -116,9 +153,12 @@ def run_simulation():
                 True,
             )
 
+            gps_flag = "OK" if gps_ok else "!GPS!"
+            _active_corr = " | ".join(drone.get_active_corruption())
             print(
-                f"[{state}] dist={dist_3d:.0f} dz={dz:.0f} hız={drone_speed / 27.78:.1f}km/h | "
+                f"[{state}][{gps_flag}] dist={dist_3d:.0f} dz={dz:.0f} hız={drone_speed / 27.78:.1f}km/h | "
                 f"yaw_err={yaw_error:.1f}° pit={smooth_desired_pitch:.1f}° thr={target_throttle:.2f}"
+                + (f"  || BOZMA: {_active_corr}" if _active_corr else "")
             )
 
             time.sleep(max(0.0, config["flight"]["dt"] - dt))
