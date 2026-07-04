@@ -333,8 +333,8 @@ class LiveInterceptRunner:
         CROSS_TRACK_BAND = 2000.0       # cm — elipse çekme bandı
         master_route = EllipseRouteModel()
         orbit_locked = False
-        route_frozen = False          # rota kilitlenince yeniden-fit durur (aşırı titremeyi keser)
-        MAX_ORBITS = 4                # EN FAZLA 4 yörünge fit edilir; 4. turdan sonra rota dondurulur
+        route_frozen = False          # yakınsama sonrası rotayı dondur (tur 5-6 titremesini önler)
+        LOCK_STABLE_LAPS = 3          # bu kadar tur kilitlendikten sonra yeniden-fit durdurulur
         orbit_buf_t, orbit_buf_x, orbit_buf_y = [], [], []
         phase_acc = 0.0
         last_target_phi = None
@@ -399,13 +399,10 @@ class LiveInterceptRunner:
                 drone_x_log.append(dx)
                 drone_y_log.append(dy)
 
-                # Yörünge bufferına ekle (rota dondurulana dek biriktir — her tur
-                # daha çok veriyle daha kararlı elips fit'i verir; buffer turlar
-                # arası TEMİZLENMEZ).
-                if not route_frozen:
-                    orbit_buf_t.append(t_now)
-                    orbit_buf_x.append(tx)
-                    orbit_buf_y.append(ty)
+                # Yörünge bufferına ekle
+                orbit_buf_t.append(t_now)
+                orbit_buf_x.append(tx)
+                orbit_buf_y.append(ty)
 
                 # İlk fit için RoutePlanner'ı besle
                 self.planner.add_observation(t_now, tx, ty)
@@ -464,7 +461,7 @@ class LiveInterceptRunner:
                                     orbit_locked = True
                                     active_route = master_route
                                     orbit_count += 1
-                                    if orbit_count >= MAX_ORBITS:
+                                    if orbit_count >= LOCK_STABLE_LAPS:
                                         route_frozen = True
                                     print(f"  ★ Yörünge kilitlendi! (tur #{orbit_count}, "
                                           f"{len(orbit_buf_t)} nokta, "

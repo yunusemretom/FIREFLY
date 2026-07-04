@@ -1,6 +1,18 @@
 # 🔥 Firefly — Drone of War Kamikaze AI
 
-**Teknofest "Drone of War" yarışması** için geliştirilmiş otonom kamikaze drone kontrol sistemi. Unreal Engine tabanlı simülatöre TCP üzerinden bağlanarak, PID kontrol algoritması ile hedefe otomatik kilitlenme ve saldırı gerçekleştirir.
+**Teknofest "Drone of War" yarışması** için geliştirilmiş otonom kamikaze/takip drone kontrol sistemi. Unreal Engine tabanlı simülatöre TCP üzerinden bağlanarak, gürültülü ve düşük frekanslı (1 Hz) hedef GPS'inden sensör füzyonu (EKF/UKF) ile temiz hedef durumu kestirir ve güdüm + PID ile hedefi kovalayıp yakalar.
+
+---
+
+> ### 🤖 Yapay Zeka Araçları & Hızlı Bağlam
+> Projeyi baştan taramadan anlamak için önce şu 3 otorite dosyasını okuyun:
+> | Dosya | İçerik |
+> |---|---|
+> | [`AI_PROJE_OZETI.md`](AI_PROJE_OZETI.md) | Detaylı proje özeti, mimari, ana algoritmalar |
+> | [`AI_DOSYA_YAPISI.md`](AI_DOSYA_YAPISI.md) | Dosya haritası — hangi dosya ne işe yarar (durum etiketleriyle) |
+> | [`AI_GOREVLER.md`](AI_GOREVLER.md) | Yapılan / devam eden / yapılacak görevler |
+>
+> Bu dosyalar kod tabanının güncel gerçeğini yansıtır; kodla çeliştiğinde onları güncelleyin.
 
 ---
 
