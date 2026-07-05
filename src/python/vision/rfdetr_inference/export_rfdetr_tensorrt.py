@@ -46,12 +46,7 @@ def build_engine_python_api() -> None:
     config = builder.create_builder_config()
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, WORKSPACE_MB * (1 << 20))
 
-    # FP16 destegi - GPU destekliyorsa etkinlestir
-    if builder.platform_has_fast_fp16:
-        config.set_flag(trt.BuilderFlag.FP16)
-        print("[INFO] FP16 precision etkin.")
-    else:
-        print("[WARNING] GPU FP16 desteklemiyor, FP32 kullanilacak.")
+    # TensorRT 11 relies on strongly typed networks (precision is defined by the ONNX model graph)
 
     print("[INFO] Engine derleniyor... (bu birkaç dakika surebilir)")
     serialized_engine = builder.build_serialized_network(network, config)

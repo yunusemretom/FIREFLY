@@ -52,3 +52,5 @@ Drones of War Teknofest/
 *.tmp
 *.bak
 *.cache
+
+object_detection/*

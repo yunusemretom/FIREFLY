@@ -24,10 +24,10 @@ import numpy as np
 
 # ─── Yapilandirma ────────────────────────────────────────────────────────────
 ENGINE_PATH    = "object_detection/inference_model.engine"
-CONF_THRESHOLD = 0.45
-RESIZE_SCALE   = 0.8          # ekran boyutu carpani (performans/kalite dengesi)
+CONF_THRESHOLD = 0.20
+RESIZE_SCALE   = 0.4          # ekran boyutu carpani (performans/kalite dengesi)
 MONITOR_INDEX  = 1            # 1 = ana ekran
-OUTPUT_FPS     = 50.0
+OUTPUT_FPS     = 100.0
 OUTPUT_PATH    = f"/home/tom/Documents/Projeler/DogFight/ekran_tespit_trt_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
 
 # SAHI dilimleme
@@ -39,10 +39,18 @@ NMS_IOU_THRESHOLD = 0.45
 # RF-DETR model input boyutu (export sirasinda kullanilan deger)
 MODEL_INPUT_SIZE = 560  # RFDETRSmall default: 560x560
 
+# Modelin çalışmayacağı yasaklı / maskelenecek bölgeler
+# [ymin, xmin, ymax, xmax] formatında (0.0 - 1.0 arası normalize oranlar)
+EXCLUSION_ZONES = [
+    [0.55, 0.70, 0.70, 1.00],  # Sağ yasaklı alan
+    [0.55, 0.00, 0.70, 0.25],  # Sol yasaklı alan
+]
+SHOW_EXCLUSION_ZONES = False     # Ekranda yasaklı bölgeleri kırmızı kesikli çizgilerle çiz
+
 # Sinif tanimlari (egitim sirasindaki siniflar)
 CLASS_NAMES = {
     0: "drone",
-    1: "f16",
+    1: "Plane",
     2: "helicopter",
     3: "rocket",
     4: "missile",
@@ -292,7 +300,7 @@ def iter_slices(img_h, img_w):
             yield key
 
 
-def sahi_predict(inferencer: TRTInferencer, frame: np.ndarray):
+def sahi_predict(inferencer: TRTInferencer, frame: np.ndarray, conf_threshold: float = CONF_THRESHOLD):
     h, w = frame.shape[:2]
     all_xyxy, all_conf, all_cls = [], [], []
 
@@ -301,7 +309,7 @@ def sahi_predict(inferencer: TRTInferencer, frame: np.ndarray):
         tile_h, tile_w = tile.shape[:2]
 
         outputs = inferencer.infer(tile)
-        xyxy, conf, cls = decode_outputs(outputs, tile_h, tile_w, CONF_THRESHOLD)
+        xyxy, conf, cls = decode_outputs(outputs, tile_h, tile_w, conf_threshold)
 
         if len(xyxy) == 0:
             continue
@@ -321,12 +329,47 @@ def sahi_predict(inferencer: TRTInferencer, frame: np.ndarray):
     clses = np.concatenate(all_cls)
 
     keep = class_aware_nms(xyxy, confs, clses,
-                           max(CONF_THRESHOLD * 0.5, 0.01),
+                           max(conf_threshold * 0.5, 0.01),
                            NMS_IOU_THRESHOLD)
     if len(keep) == 0:
         return np.empty((0, 4)), np.empty(0), np.empty(0, dtype=int)
 
     return xyxy[keep], confs[keep], clses[keep]
+
+def apply_exclusion_zones(frame):
+    h, w = frame.shape[:2]
+    masked_frame = frame.copy()
+    for ymin, xmin, ymax, xmax in EXCLUSION_ZONES:
+        # Koordinat siralamasinin (start < stop) dogru olmasini garanti et
+        y1, y2 = sorted([int(ymin * h), int(ymax * h)])
+        x1, x2 = sorted([int(xmin * w), int(xmax * w)])
+        masked_frame[y1:y2, x1:x2] = 0
+    return masked_frame
+
+
+def draw_exclusion_zones(frame):
+    if not SHOW_EXCLUSION_ZONES:
+        return frame
+    h, w = frame.shape[:2]
+    out = frame.copy()
+    for ymin, xmin, ymax, xmax in EXCLUSION_ZONES:
+        y1, y2 = sorted([int(ymin * h), int(ymax * h)])
+        x1, x2 = sorted([int(xmin * w), int(xmax * w)])
+        
+        # Yasakli bolge uzerine yari-saydam kirmizi maske ciz
+        overlay = out.copy()
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 0, 255), -1)
+        cv2.addWeighted(overlay, 0.12, out, 0.88, 0, out)
+        
+        # Sinir cizgisi
+        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 0, 255), 1, lineType=cv2.LINE_AA)
+        
+        # Etiket
+        label = "MASKED"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        cv2.rectangle(out, (x1, y1), (x1 + tw + 6, y1 + th + 6), (0, 0, 255), -1)
+        cv2.putText(out, label, (x1 + 3, y1 + th + 3), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+    return out
 
 
 # ─── Annotasyon ──────────────────────────────────────────────────────────────
@@ -388,9 +431,12 @@ def main():
                 fps = (fps_alpha * fps + (1.0 - fps_alpha) * cur_fps) if fps > 0 else cur_fps
             prev_time = now
 
-            xyxy, confs, class_ids = sahi_predict(inferencer, frame)
+            # Yasakli bolgeleri maskele ve tahmini maskelenmis frame uzerinde yap
+            predict_frame = apply_exclusion_zones(frame)
+            xyxy, confs, class_ids = sahi_predict(inferencer, predict_frame)
 
             annotated = annotate(frame, xyxy, confs, class_ids)
+            annotated = draw_exclusion_zones(annotated)
             annotated = put_stats(annotated, fps, len(xyxy))
 
             # Video yazar
