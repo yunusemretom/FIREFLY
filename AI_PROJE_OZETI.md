@@ -125,6 +125,13 @@ Hedef tekrarlayan rota izlediğinden, her ölçümü bağımsız tahmin etmek ye
   otomatik yeniden fit.
 - `solve_intercept()` — dronun sabit hızıyla hedefi rota üzerinde en erken
   yakalayacağı zaman/nokta (lead pursuit çözümü).
+- **Canlı takipçi** (`tests/python/test_route_intercept.py`): sim_bridge ile
+  aynı guidance kontrolcülerini (Yaw/Pitch/ThrottleController) kullanır. Halka
+  üzerinde dümen **pure pursuit** carrot'uyla (dronun fazının önünde), hedefe
+  yetişme ise yuvaya faz farkından **hız kanalıyla** yapılır — sabit noktayı
+  kovalamak kerteriz çöküşü + 360° dönüş üretiyordu. Hedef irtifası sıçrama
+  reddi olan ortalamayla kilitlenir; bayat/bozuk GPS'te düz uçuşa geçilir.
+  `--headless --duration N` ile GUI'siz koşup CSV + rapor PNG üretir.
 
 ### 3.4 CTRV EKF (alternatif) — `navigation/ekf.py`
 Config-driven (`config/ekf_params.yaml → ctrv_ekf`) 5 durumlu EKF
