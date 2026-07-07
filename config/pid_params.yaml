@@ -60,3 +60,14 @@ route_intercept:
   ring_v_auth_cms: 1100.0      # halka üstü hız düzeltme yetkisi (± cm/s)
   lead_time_s: 1.0             # GPS gecikme telafisi: hedef fazı omega*lead kadar öne alınır
   wait_for_lock: true          # ilk yörünge kilidine kadar hover'da bekle, sonra harekete geç
+
+# --- Kamikaze taarruz güdümü (tests/python/test_route_kamikaze.py) ---
+# Takip yerine hedefi rota üzerinde en erken yakalama (lead intercept)
+# noktasında VURUR. Yuva/takip mesafesi yok; tam hızla çarpışmaya dalar.
+route_kamikaze:
+  attack_speed_cms: 2800.0     # taarruz hızı (dron tam hız kapanma)
+  terminal_range_cm: 3000.0    # bu mesafenin altında çözücüyü bırak, doğrudan hedefe dal
+  hit_radius_cm: 500.0         # 3B bu yarıçapa girince VURUŞ sayılır
+  lead_time_s: 1.0             # GPS gecikme telafisi (solve_intercept saatine eklenir)
+  wait_for_lock: true          # ilk yörünge kilidine kadar hover'da bekle, sonra taarruza geç
+  lock_stable_laps: 2          # bu kadar tur kilit sonrası rota dondurulur (kararlı intercept)
