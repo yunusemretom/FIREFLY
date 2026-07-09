@@ -24,6 +24,13 @@ class PitchController:
         self.slew = SlewLimiter(config["slew"]["pitch_max_change_per_sec"])
         self.min_pitch = config["limits"]["min_pitch"]
         self.max_pitch = config["limits"]["max_pitch"]
+        # Stick tam skalası (deg): canlı kalibrasyonla ölçüldü — sim SIMETRIK,
+        # stick*60 = gerçek eğim (0.25→15°, 0.50→30°, 0.75→45°).
+        self.full_scale = float(config["limits"].get("pitch_full_scale_deg", 60.0))
+        # Fren (burun-yukarı) açı tavanı: kamera hedefi görüşte tutsun diye
+        # max_pitch'ten ayrı, daha sıkı bir tavan. Sert fren yerine hafif
+        # burun-yukarı + sürükleme ile yavaşla; mesafe hız kanalıyla tutulur.
+        self.brake_pitch_max = float(config["limits"].get("max_brake_pitch", 12.0))
 
     def calculate(
         self, state, target_speed_cmd, drone_speed, target_elevation, drone_pitch, yaw_error, dt
@@ -35,15 +42,18 @@ class PitchController:
             speed_adj = self.speed_pid.calculate(speed_error_ms, dt)
 
             raw_desired = target_elevation - speed_adj
-            raw_desired = clamp(raw_desired, self.min_pitch, self.max_pitch)
+            # Fren tarafı (burun yukarı, pozitif) kamera-görüş tavanıyla sınırlı
+            raw_desired = clamp(raw_desired, self.min_pitch,
+                                min(self.max_pitch, self.brake_pitch_max))
 
         smooth_desired = self.slew.update(raw_desired, dt)
 
-        # Normalize to [-1, 1] angle command
-        if smooth_desired < 0:
-            pitch_cmd = smooth_desired / abs(self.min_pitch) if self.min_pitch != 0 else 0.0
-        else:
-            pitch_cmd = smooth_desired / abs(self.max_pitch) if self.max_pitch != 0 else 0.0
+        # Normalize to [-1, 1] angle command — SİMETRİK tam skala.
+        # ESKİ HATA: pozitif açı max_pitch'e (20) bölünüyordu; sim stick'i
+        # ±full_scale (60°) yorumladığından fren isteği 3 KAT aşırı eğim
+        # üretiyordu (14° istek → 0.71 stick → 43° gerçek geriye yatış →
+        # hedef kamera görüşünden çıkıyordu).
+        pitch_cmd = smooth_desired / self.full_scale if self.full_scale else 0.0
 
         # Scale pitch by yaw alignment: prevents crabbing sideways before facing the target.
         # cos(0°)=1 (aligned → full pitch), cos(90°)=0 (perpendicular → reduced pitch).

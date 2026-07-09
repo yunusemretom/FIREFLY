@@ -79,6 +79,17 @@ Efsane: `[x]` tamamlandı · `[~]` kısmen/devam ediyor · `[ ]` bekliyor
       görüntü işleme + kilit); hedef kaybında komutlar sıfıra söner, 1.5 s
       sonra servo kendini kapatır. Canlı doğrulama bekliyor (simülatör + TRT
       engine gerekli).
+      **TAKİP fazı FPS optimizasyonu (2026-07-10):** dört çarpımsal kazanç:
+      (1) `TRACK_ONLY_LOCK_TARGET` — faza girerken kilit hedefi dışındaki
+      tracker'lar atılır (CSRT maliyeti tracker sayısıyla doğrusal);
+      (2) `CSRT_FAST` — sort_csrt fabrikası monkeypatch'le hafifletilmiş
+      parametrelere çevrildi (ölçek 33→9, ADMM 4→2, şablon 200→150, kanal
+      ağırlıkları kapalı; ~13.5→9 ms, sentetik testte 4.2 ms/kare);
+      (3) `TRACK_STRIDE=2` — CSRT her 2 karede bir, arada son kutu;
+      (4) yinelenen kare atlama (identity check) + gereksiz `frame.copy()`
+      kaldırıldı. Sentetik ölçüm: tek hedef TAKİP güncellemesi ~240 FPS
+      (stride öncesi). pycuda ayrıca numpy 2 ile yeniden derlendi
+      (`--no-build-isolation`; eski pip izole ortamda numpy 1.x kullanıyordu).
 
 ### GCS / Arayüz
 - [x] Web tabanlı yer kontrol istasyonu: `server.js` TCP↔WebSocket köprüsü,

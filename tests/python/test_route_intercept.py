@@ -372,6 +372,7 @@ class LiveInterceptRunner:
                         v_fwd, v_des, fy, fp, f_thr, 0.0,
                         int(meas_changed), int(data_stale), int(near_field),
                         int(tracker.orbit_locked), true_dist,
+                        d_rot[1],   # gerçek pitch açısı (fren yatışı analizi)
                     ))
 
                 if self.duration is not None and t_now >= self.duration:
@@ -413,7 +414,7 @@ class LiveInterceptRunner:
                 "dist_2d", "dist_3d", "yaw_err", "heading", "yaw_rate",
                 "d_speed", "v_des", "cmd_yaw", "cmd_pitch", "cmd_thr", "cmd_roll",
                 "meas_changed", "data_stale", "near_field", "orbit_locked",
-                "true_dist"]
+                "true_dist", "d_pitch"]
         arr = np.array(log_rows, dtype=float)
         os.makedirs(self.log_dir, exist_ok=True)
         csv_path = os.path.join(self.log_dir, "route_intercept_run.csv")

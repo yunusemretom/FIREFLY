@@ -7,6 +7,13 @@ flight:
 limits:
   min_pitch: -60.0
   max_pitch: 20.0
+  # Canlı kalibrasyon (2026-07-10): sim stick'i SİMETRİK yorumlar,
+  # gerçek eğim = stick * 60° (0.25→15°, 0.50→30°, 0.75→45°).
+  pitch_full_scale_deg: 60.0
+  # Fren (burun-yukarı) tavanı: kamera hedefi görüşte tutar. Eski davranış
+  # fiilen ~43°'ye kadar geriye yatıyordu (normalizasyon hatası) → hedef
+  # görüşten çıkıyordu.
+  max_brake_pitch: 12.0
   min_throttle: -1.0
   max_throttle: 0.90
 
@@ -68,7 +75,13 @@ route_intercept:
   # ~40 m, hedefe 15 cm'e kadar tehlikeli yaklaşma). catch_damp kapanma
   # hızını söndürür, arc_tau kısaltılarak faz gecikmesi azaltıldı.
   catch_gain: 0.5              # yuvaya yay farkı (cm) -> ek hız (cm/s)
-  catch_damp: 1.2              # yay farkı türevi sönümlemesi (boyutsuz)
+  catch_damp: 1.5              # yay farkı türevi sönümlemesi (boyutsuz)
+                               # [1.2→1.5: fren tavanı 12° olunca daha erken
+                               # hız kesme gerekir — sert pitch freni yerine]
+  slot_approach_accel_cms2: 250.0  # sqrt yaklaşma profili: 12° fren yatışının
+                               # sağlayabildiği ~2.5 m/s² yavaşlama varsayımı;
+                               # kapanma hızı sqrt(2·a·yay) ile sınırlanır →
+                               # yuva aşımı (hedefin dibine dalma) engellenir
   arc_tau_s: 0.5               # yay farkı LPF zaman sabiti (s) [eski: ~1.0]
   ring_v_auth_cms: 1400.0      # halka üstü hız düzeltme yetkisi (± cm/s)
   lead_time_s: 1.0             # GPS gecikme telafisi: hedef fazı omega*lead kadar öne alınır

@@ -14,6 +14,13 @@ Faz Sistemi (test_rfdetr_sahi_csrt.py ile ayni prensip):
     - RF-DETR CALISMAZ -> yuksek FPS; SORT-CSRT (CSRT prediction) takip eder.
     - Tum tracker'lar kaybolursa erken TESPIT fazina doner.
 
+TAKIP fazi hizlandirmalari (yapilandirma blogundan ayarlanir):
+    - TRACK_ONLY_LOCK_TARGET: faza girerken kilit hedefi disindaki tracker'lar
+      atilir (CSRT maliyeti tracker sayisiyla dogrusal buyur).
+    - TRACK_STRIDE: CSRT her N karede bir kosulur, arada son kutu kullanilir.
+    - CSRT_FAST: hafifletilmis CSRT (olcek 33->9, ADMM 4->2, sablon 200->150).
+    - Yinelenen kare atlama: ekran yakalama ayni kareyi verdiyse islenmez.
+
 Kilitlenme:
   - Ekran merkezinde sabit bir KILITLENME DORTGENI cizilir.
   - Merkeze en yakin takip edilen hedef secilir (secim track ID'ye yapiskan).
@@ -46,8 +53,8 @@ Gereksinimler:
 
 from __future__ import annotations
 
-import io as _io
 import math
+import os
 import sys
 import time
 import types
@@ -91,8 +98,8 @@ import drone_sdk                                        # noqa: E402
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Model / Kaynak ────────────────────────────────────────────────────────────
-ENGINE_PATH    = str(_TRT_DIR / "object_detection" / "inference_model.engine")
-CONF_THRESHOLD = 0.45
+ENGINE_PATH    = str ("object_detection/inference_model.engine")
+CONF_THRESHOLD = 0.70
 MONITOR_INDEX  = 1            # 1 = ana ekran
 RESIZE_SCALE   = 0.4          # ekran boyutu carpani (inference yuku icin)
 
@@ -110,6 +117,17 @@ TRACK_DURATION  = 4.0    # sadece CSRT takip fazi
 SORT_MAX_AGE    = 300
 SORT_MIN_HITS   = 1
 SORT_IOU_THRESH = -0.8   # GIoU esigi (negatif = esnek esleme)
+
+# ── TAKIP fazi hizlandirma ────────────────────────────────────────────────────
+# CSRT maliyeti = tracker sayisi x parametre agirligi x kare orani. Uc kol da
+# ayri ayri kisilir; toplam kazanc carpimsaldir.
+TRACK_ONLY_LOCK_TARGET = True   # TAKIP'e girerken kilit hedefi disindaki tracker'lari at
+TRACK_STRIDE           = 2      # CSRT guncellemesi her N karede bir (1 = her kare)
+CSRT_FAST              = True   # hafifletilmis CSRT parametreleri
+CSRT_NUM_SCALES        = 9      # varsayilan 33 — olcek arama sayisi
+CSRT_ADMM_ITERS        = 2      # varsayilan 4  — filtre optimizasyon iterasyonu
+CSRT_TEMPLATE_SIZE     = 150.0  # varsayilan 200 — sablon cozunurlugu
+RECORD_VIDEO           = True   # False = video yazimini kapat (birkac ms/kare)
 
 # ── Kilitlenme dortgeni ───────────────────────────────────────────────────────
 LOCK_BOX_FRAC       = 0.22   # dortgen kenari = min(w, h) * frac
@@ -153,6 +171,65 @@ rt.SLICE_WIDTH       = SLICE_WIDTH
 rt.SLICE_HEIGHT      = SLICE_HEIGHT
 rt.OVERLAP_RATIO     = OVERLAP_RATIO
 rt.NMS_IOU_THRESHOLD = NMS_IOU_THRESHOLD
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  HIZLI CSRT (sort_csrt fabrikasini hafifletilmis parametrelerle ezer)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Klonlanmis repoyu degistirmemek icin monkeypatch: CSRTTracker, tracker'i modul
+# global'i _create_csrt_tracker uzerinden actigindan buradaki ezme yeterlidir.
+
+import sort_csrt as _sort_mod                           # noqa: E402
+
+_orig_create_csrt = _sort_mod._create_csrt_tracker
+
+
+def _fast_csrt_tracker():
+    """Hafifletilmis CSRT: olcek arama 33->9, ADMM 4->2, sablon 200->150,
+    kanal agirliklari kapali. RTX 4050 uzerinde tek hedefte ~13.5 -> ~9 ms;
+    kucuk/yavas buyuyen hedeflerde takip kalitesi kaybi ihmal edilebilir."""
+    if not CSRT_FAST:
+        return _orig_create_csrt()
+    try:
+        p = cv2.TrackerCSRT_Params()
+        p.number_of_scales    = CSRT_NUM_SCALES
+        p.admm_iterations     = CSRT_ADMM_ITERS
+        p.template_size       = CSRT_TEMPLATE_SIZE
+        p.use_channel_weights = False
+        return cv2.TrackerCSRT_create(p)
+    except (AttributeError, TypeError, cv2.error):
+        return _orig_create_csrt()   # eski OpenCV: varsayilan fabrikaya don
+
+
+_sort_mod._create_csrt_tracker = _fast_csrt_tracker
+
+
+def prune_to_lock_target(sort_tracker: Sort, lock: "LockOnManager") -> int:
+    """TAKIP fazina girerken kilit hedefi disindaki tracker'lari atar.
+
+    Kilitlenme/servo tek hedefle calisir; her ek tracker her karede tam CSRT
+    maliyeti ekler. Atilan tracker sayisini doner. Kilit hedefi yoksa merkeze
+    en yakin tracker tutulur.
+    """
+    if len(sort_tracker.trackers) <= 1:
+        return 0
+
+    keep = None
+    if lock.target_id is not None:
+        for t in sort_tracker.trackers:
+            if t.id + 1 == lock.target_id:      # SORT disariya id+1 verir
+                keep = t
+                break
+    if keep is None:
+        cx0, cy0 = lock.cx, lock.cy
+        keep = min(
+            sort_tracker.trackers,
+            key=lambda t: ((t.bbox[0] + t.bbox[2]) / 2 - cx0) ** 2
+                        + ((t.bbox[1] + t.bbox[3]) / 2 - cy0) ** 2,
+        )
+    dropped = len(sort_tracker.trackers) - 1
+    sort_tracker.trackers = [keep]
+    return dropped
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -367,10 +444,15 @@ class VisualServoController:
 #  SORT SESSIZ CAGRI + CIZIM YARDIMLARI
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Tek seferlik devnull — her cagride StringIO tahsis etmek yerine printler
+# dogrudan cope yazilir (TAKIP fazinda her karede cagrildigi icin onemli).
+_DEVNULL = open(os.devnull, "w")
+
+
 def _quiet_sort_update(tracker: Sort, frame: np.ndarray, dets: np.ndarray) -> np.ndarray:
     """sort_csrt.py icindeki debug printlerini bastirarak Sort.update cagirir."""
     old_stdout = sys.stdout
-    sys.stdout = _io.StringIO()
+    sys.stdout = _DEVNULL
     try:
         return tracker.update(frame, dets)
     finally:
@@ -505,16 +587,19 @@ def main() -> None:
     print(f"[INFO] Drone SDK: {'BAGLI' if sdk_connected else 'bagli degil (servo devre disi)'}")
 
     # ── Video yazici ──────────────────────────────────────────────────────────
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = str(OUTPUT_DIR / f"visual_servo_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
-    video_writer = cv2.VideoWriter(
-        output_path, cv2.VideoWriter_fourcc(*"mp4v"), OUTPUT_FPS, (frame_w, frame_h),
-    )
-    if not video_writer.isOpened():
-        print("[WARN] Video yazici acilamadi; sadece ekranda gosterilecek.")
-        video_writer = None
-    else:
-        print(f"[INFO] Video kaydi: {output_path}")
+    video_writer = None
+    output_path  = "(kayit kapali)"
+    if RECORD_VIDEO:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        output_path = str(OUTPUT_DIR / f"visual_servo_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
+        video_writer = cv2.VideoWriter(
+            output_path, cv2.VideoWriter_fourcc(*"mp4v"), OUTPUT_FPS, (frame_w, frame_h),
+        )
+        if not video_writer.isOpened():
+            print("[WARN] Video yazici acilamadi; sadece ekranda gosterilecek.")
+            video_writer = None
+        else:
+            print(f"[INFO] Video kaydi: {output_path}")
 
     win_name = "RF-DETR TRT SAHI + CSRT + Gorsel Servo"
     cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
@@ -527,6 +612,9 @@ def main() -> None:
     frame_idx   = 0
     n_detect_current = 0
     thr = pit = yaw = 0.0
+    prev_raw: Optional[np.ndarray] = None    # yinelenen kare tespiti (identity)
+    track_tick   = 0                          # TAKIP fazi stride sayaci
+    last_tracked = np.empty((0, 7))           # stride atlanan karede son sonuc
 
     print(f"\n{'='*64}\n"
           f"  Faz dongusu: TESPIT({DETECT_DURATION}s) -> TAKIP({TRACK_DURATION}s)\n"
@@ -536,9 +624,15 @@ def main() -> None:
     try:
         while True:
             frame = capture.get()
-            if frame is None:
+            # Yinelenen kare atlama: yakalama thread'i her karede YENI dizi
+            # uretir; ayni dizi (identity) geldiyse yeni goruntu yok demektir.
+            # CSRT'yi ayni kare uzerinde tekrar kosturmak bosa maliyettir.
+            # Ayni sebeple frame.copy() gereksizdir: bu dizi thread tarafindan
+            # bir daha yazilmaz, uzerine dogrudan annotasyon yapilabilir.
+            if frame is None or frame is prev_raw:
+                time.sleep(0.001)
                 continue
-            frame = frame.copy()
+            prev_raw = frame
             frame_idx += 1
 
             now = time.perf_counter()
@@ -569,22 +663,42 @@ def main() -> None:
 
                 if elapsed >= DETECT_DURATION:
                     if len(tracked) > 0:
-                        print(f"[KARE {frame_idx}] TAKIP fazina gecildi — {len(tracked)} hedef")
+                        # Kilit hedefi disindaki tracker'lari at: her ek tracker
+                        # TAKIP fazinda her karede tam CSRT maliyeti ekler.
+                        # lock.target_id onceki karelerin lock.update'inden guncel
+                        if TRACK_ONLY_LOCK_TARGET:
+                            dropped = prune_to_lock_target(sort_tracker, lock)
+                            if dropped:
+                                print(f"[KARE {frame_idx}] {dropped} yan hedef birakildi (hiz).")
+                        print(f"[KARE {frame_idx}] TAKIP fazina gecildi — "
+                              f"{len(sort_tracker.trackers)} hedef")
                         in_track = True
+                        track_tick = 0
+                        last_tracked = tracked
                     phase_start = time.perf_counter()
 
             # ══ TAKIP FAZI: sadece SORT-CSRT (yuksek FPS) ══════════════════════
             else:
                 phase = "TAKIP"
                 n_detect_current = 0
-                tracked = _quiet_sort_update(sort_tracker, frame, np.empty((0, 6)))
+
+                # Stride: CSRT her TRACK_STRIDE karede bir kosulur; aradaki
+                # karelerde son kutu yeniden kullanilir (hedef kareler arasi
+                # birkac piksel oynar, kilit/servo icin fark ihmal edilebilir).
+                track_tick += 1
+                if track_tick % TRACK_STRIDE == 0 or len(last_tracked) == 0:
+                    tracked = _quiet_sort_update(sort_tracker, frame, np.empty((0, 6)))
+                    last_tracked = tracked
+                    if len(tracked) == 0:
+                        print(f"[KARE {frame_idx}] Hedefler kayboldu — TESPIT fazina donuluyor.")
+                        in_track = False
+                        phase_start = time.perf_counter()
+                else:
+                    tracked = last_tracked
+
                 draw_timer_bar(frame, elapsed, TRACK_DURATION, "TAKIP", COL_ACQUIRE)
 
-                if len(tracked) == 0:
-                    print(f"[KARE {frame_idx}] Hedefler kayboldu — TESPIT fazina donuluyor.")
-                    in_track = False
-                    phase_start = time.perf_counter()
-                elif elapsed >= TRACK_DURATION:
+                if in_track and elapsed >= TRACK_DURATION:
                     in_track = False
                     phase_start = time.perf_counter()
 
@@ -653,6 +767,8 @@ def main() -> None:
                 sort_tracker = Sort(max_age=SORT_MAX_AGE, min_hits=SORT_MIN_HITS,
                                     iou_threshold=SORT_IOU_THRESH)
                 lock.reset()
+                track_tick = 0
+                last_tracked = np.empty((0, 7))
                 phase_start = time.perf_counter()
 
     finally:

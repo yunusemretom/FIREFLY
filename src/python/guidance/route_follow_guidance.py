@@ -56,6 +56,11 @@ class RouteFollowGuidance:
         # kanal (LPF + hız PID gecikmesiyle) yuva etrafında sönümsüz salınım
         # üretiyordu: v_des std ~800 cm/s, mesafe p2p ~40 m ölçüldü.
         self.catch_damp = float(ri.get("catch_damp", 1.2))
+        # Yuvaya sqrt yaklaşma profili: fren tavanı 12° yatışla (~200-250
+        # cm/s² yavaşlama) durdurulabilecek kapanma hızından fazlasına izin
+        # verme. Bu olmadan dron yuvayı 40-50 m aşıp hedefin dibine giriyordu
+        # (9-45 cm ölçüldü), sonra yarım tur geriden toparlıyordu.
+        self.slot_accel = float(ri.get("slot_approach_accel_cms2", 250.0))
         self.arc_tau_s = float(ri.get("arc_tau_s", 0.5))
         self.ring_v_auth = float(ri.get("ring_v_auth_cms", 1100.0))
         self.ri_follow_cm = float(ri.get("follow_distance_cm", 800.0))
@@ -122,6 +127,10 @@ class RouteFollowGuidance:
         if not (500.0 <= v_route <= self.chase_max):
             v_route = self.nominal_target_speed
         catch = self.catch_gain * self.arc_filt + self.catch_damp * self.arc_rate
+        # sqrt yaklaşma tavanı: |catch| <= sqrt(2·a_brake·|yay|) — yuvaya
+        # varışta kapanma hızı sıfıra iner, aşma (overshoot) olmaz.
+        v_safe = math.sqrt(2.0 * self.slot_accel * abs(self.arc_filt))
+        catch = max(-v_safe, min(v_safe, catch))
         catch = max(-self.ring_v_auth, min(self.ring_v_auth, catch))
         v_ring = v_route + catch
 
