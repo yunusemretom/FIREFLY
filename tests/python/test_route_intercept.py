@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import yaml
 
+# pyrefly: ignore [missing-import]
 from navigation.route_intercept_system import RoutePlanner, solve_intercept
 from navigation.telemetry_conditioner import MeasurementGate, AltitudeLock
 from navigation.orbit_lock import OrbitLockTracker
@@ -266,7 +267,7 @@ class LiveInterceptRunner:
                 ring_v_des = None
                 if active_route.fitted:
                     guide_x, guide_y, ring_v_des = self.guidance.guide(
-                        active_route, dx, dy, tx, ty)
+                        active_route, dx, dy, tx, ty, dt=dt)
                     intercept_pt = (float(guide_x), float(guide_y))
                     if dash is not None:
                         dash.set_ellipse(active_route)
@@ -309,14 +310,17 @@ class LiveInterceptRunner:
                     print("  ▶ Yörünge kilitli — takibe geçiliyor.")
                     wait_msg_shown = False
 
-                # ---- YAW: kerteriz hatası → dönüş komutu ----
-                yaw_error, yaw_cmd = self.yaw_ctrl.calculate(ldx, ldy, d_rot[2], dt)
+                # ---- YAW: kerteriz hatası → dönüş komutu (gyro damping) ----
+                yaw_error, yaw_cmd = self.yaw_ctrl.calculate(
+                    ldx, ldy, d_rot[2], dt, yaw_rate=yaw_rate_meas)
 
                 if waiting or data_stale or near_field:
-                    # Bekleme / yeni ölçüm yok / guide üstündeyiz: dönme
+                    # Bekleme / yeni ölçüm yok / guide üstündeyiz: dönme.
+                    # reset() HER İKİ yolun integralini temizler — yalnızca
+                    # inner_pid.integral'i sıfırlamak gyro yolundaki windup'ı
+                    # bırakıyordu (kilit sonrası yaw satürasyonunun kök nedeni).
                     yaw_cmd = 0.0
-                    self.yaw_ctrl.inner_pid.integral = 0.0
-                    self.yaw_ctrl.inner_pid.first_run = True
+                    self.yaw_ctrl.reset()
                     last_yaw_cmd = 0.0
                     pitch_align_err = 0.0   # düz uçuşta pitch tam yetkili
                 elif not data_valid:

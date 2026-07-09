@@ -11,7 +11,7 @@
          - AI_GOREVLER.md                  → yapılan / yapılacak görevler
     2. Bu dosyalar güncel değilse veya kodla çeliştiğini fark edersen, ilgili
        satırı doğrula ve GÜNCELLE — böylece bir sonraki araç tekrar taramasın.
-  Son güncelleme: 2026-07-07
+  Son güncelleme: 2026-07-10
 ================================================================================
 -->
 
@@ -137,6 +137,25 @@ tekrar kullanılabilir modüllerde):
   intercept'te 0 = klasik davranış).
 - `guidance/route_follow_guidance.py` — `RouteFollowGuidance` (halka üstü carrot
   pure-pursuit + ayrışık hız kanalı) + `GuidePointSlewLimiter`.
+  **2026-07-10 canlı-sim kalibrasyonu** (kilit-sonrası yaw RMS 54.7→21.5 deg/s,
+  savrulma 3.25→0.26 tur/dk, en yakın gerçek mesafe 20→1291 cm):
+  - Hız (catch) kanalı **PD**: P-only + ~1 s LPF gecikmesi yuva etrafında
+    sönümsüz salınım üretiyordu (v_des std ~860, mesafe p2p ~40 m, hedefe
+    12-20 cm'e tehlikeli dalış). `catch_gain 0.5` + `catch_damp 1.2` (LPF
+    çıkışının türevi), `arc_tau_s 0.5`.
+  - Halka taban hızı **yerel** elips hızı `v(φ)=|ω|·√(a²sin²φ+b²cos²φ)` —
+    sabit `|ω|·r_eff` ortalaması gerçek elipste (a/b≈2.4) hız kanalına ±%40
+    periyodik bozucu sokuyordu.
+  - Cross-track band sınırındaki keskin halka/yaklaşma mod geçişi **smoothstep
+    harmanlamayla süreklileştirildi** — sınırda mod titreşimi (26 geçiş/132 s)
+    guide noktasını zıplatıp 70 deg/s'lik yaw patlamaları tetikliyordu.
+  - `EllipseRouteModel.nearest_phi` artık **parabolik yerel iyileştirmeli**
+    (hata 0.5°→0.0036°); önceden carrot ~220 cm basamaklarla zıplıyordu.
+  - `YawController`: gyro yolunda integral artık sınırlı (`int_limit` 150
+    deg·s) + `reset()` metodu (bekleme/near-field fazında runner çağırır;
+    önceden windup kilit sonrası yaw'ı satüre ediyordu). `kd_gyro 0.004`
+    (kanıtlanmış P:D=8.75). Hız→pitch PID: kp 2.5, kd 0.35, slew 45°/s
+    (kp 4.0 + 30°/s slew doygunluğu ~3.4 s periyotlu limit-cycle üretiyordu).
 - **Canlı takipçi** (`tests/python/test_route_intercept.py`): artık **ince bir
   harness** — yukarıdaki modülleri + Yaw/Pitch/ThrottleController'ı bağlar. Halka
   üzerinde dümen **pure pursuit** carrot'uyla (dronun fazının önünde), hedefe

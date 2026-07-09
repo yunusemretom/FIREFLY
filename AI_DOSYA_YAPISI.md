@@ -64,6 +64,8 @@ Firefly/
 │   │       ├── run_rfdetr_video_test.py
 │   │       ├── run_rfdetr_screen_capture.py
 │   │       └── run_rfdetr_sahi_test.py
+│   │   └── sort_csrt_tracking/       🔧 SORT+CSRT çoklu nesne tracker (klonlanmış repo)
+│   │       └── sort_csrt.py           ⭐ Sort + CSRTTracker sınıfları
 │   │
 │   ├── comms/                      🗂️ Sunucu iletişimi/telemetri parser (iskelet)
 │   │   ├── server_client.py
@@ -88,6 +90,9 @@ Firefly/
 │   │   ├── test_ekf.py                 🧪 EKF testi (loiter sim + matplotlib)
 │   │   ├── test_route_intercept.py     🧪 Rota takip testi (İNCE harness; modüllerden çeker)
 │   │   ├── test_route_kamikaze.py      🧪 Rota kamikaze taarruz testi (faz-demirli intercept)
+│   │   ├── test_rfdetr_sahi_csrt.py    🧪 RF-DETR SAHI + SORT-CSRT video tracking testi
+│   │   ├── test_rfdetr_trt_visual_servo.py 🧪 TRT+SAHI+CSRT ekran testi: merkez kilitlenme dörtgeni + G tuşuyla görsel servolama (drone_sdk)
+│   │   ├── test_rfdetr_tctrack.py      🧪 RF-DETR + TCTrack otomatik faz dongusu testi
 │   │   ├── route_viz.py                🔧 Ortak test görselleştirme (tema+pano+elips sim hedefi)
 │   │   ├── test_pursuit_smoothing.py   🧪 Canlı-koşul emülasyon harness (A/B/C)
 │   │   ├── test_pursuit_live.py        ⭐🧪 Düzeltilmiş CANLI pursuit runner

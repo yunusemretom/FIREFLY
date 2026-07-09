@@ -8,7 +8,7 @@ limits:
   min_pitch: -60.0
   max_pitch: 20.0
   min_throttle: -1.0
-  max_throttle: 0.8
+  max_throttle: 0.90
 
 thresholds:
   seyir_dz: 800.0
@@ -18,20 +18,27 @@ thresholds:
 inner_pid:
   pitch: {kp: 0.045, ki: 0.0, kd: 0.005}
   roll: {kp: 0.035, ki: 0.0, kd: 0.002}
-  yaw: {kp: 0.035, ki: 0.0005, kd: 0.002}
+  # kd: PID fallback, kd_gyro: gyro damping, int_limit: windup sınırı (deg·s)
+  # kp/kd_gyro = 8.75 — pursuit v2'de kanıtlanan P:D oranı (0.002 yetersiz
+  # sönümleme → yaw RMS 49 deg/s ölçüldü; 0.004 ile ~19'a düşer).
+  yaw: {kp: 0.035, ki: 0.0003, kd: 0.002, kd_gyro: 0.004, int_limit: 150.0}
 
 outer_pid:
-  altitude: {kp: 0.20, ki: 0.02, kd: 0.05, clamp_min: -1.0, clamp_max: 0.45, int_limit: 2.0}
+  altitude: {kp: 0.40, ki: 0.06, kd: 0.10, clamp_min: -1.0, clamp_max: 0.75, int_limit: 6.0}
   # int_limit 20 iken integral en fazla ~2 derece eğim tutabiliyordu; yüksek
   # seyir hızını (20+ m/s) sürdürmek ~15 derece ister -> kalıcı hız açığı.
-  speed: {kp: 3.0, ki: 0.35, kd: 0.1, clamp_min: -45.0, clamp_max: 45.0, int_limit: 120.0}
+  # kp 4.0 + 30°/s slew: hız→pitch iç döngüsü ~3.4 s periyotlu limit-cycle
+  # üretiyordu (ölçüm: v_des std 587 iken gerçek hız std 1166 cm/s — komuttan
+  # bağımsız salınım). kp düşürüldü, kd sönümleme artırıldı, slew doygunluğu
+  # (klasik limit-cycle kaynağı) 45°/s ile azaltıldı.
+  speed: {kp: 2.5, ki: 0.50, kd: 0.35, clamp_min: -25.0, clamp_max: 45.0, int_limit: 150.0}
 
 slew:
-  pitch_max_change_per_sec: 20.0
+  pitch_max_change_per_sec: 45.0
 
 # --- 5-metre arkadan takip güdümü ---
 pursuit:
-  follow_distance_cm: 2000.0  # hedefin kaç cm arkasında kal (5 m)
+  follow_distance_cm: 1000.0  # hedefin kaç cm arkasında kal (5 m)
 
   # Dış döngü PID: imzalı mesafe hatası (cm) → hız düzeltmesi
   #   100 cm geride → +15 cm/s, 500 cm → +75 cm/s, 2000 cm → +300 cm/s
@@ -56,8 +63,14 @@ route_intercept:
   lookahead_phi: 0.25          # halka üstünde carrot'un dronun önündeki fazı (rad)
   cross_track_band_cm: 2000.0  # elipse çekme bandı (cm)
   nominal_target_speed_cms: 1700.0  # Talon seyir hızı varsayımı
-  catch_gain: 0.6              # yuvaya yay farkı (cm) -> ek hız (cm/s)
-  ring_v_auth_cms: 1100.0      # halka üstü hız düzeltme yetkisi (± cm/s)
+  # Hız (catch) kanalı PD: P-only 0.8 kazanç, LPF+hız-PID gecikmesiyle yuva
+  # etrafında sönümsüz salınım üretiyordu (v_des std ~800 cm/s, mesafe p2p
+  # ~40 m, hedefe 15 cm'e kadar tehlikeli yaklaşma). catch_damp kapanma
+  # hızını söndürür, arc_tau kısaltılarak faz gecikmesi azaltıldı.
+  catch_gain: 0.5              # yuvaya yay farkı (cm) -> ek hız (cm/s)
+  catch_damp: 1.2              # yay farkı türevi sönümlemesi (boyutsuz)
+  arc_tau_s: 0.5               # yay farkı LPF zaman sabiti (s) [eski: ~1.0]
+  ring_v_auth_cms: 1400.0      # halka üstü hız düzeltme yetkisi (± cm/s)
   lead_time_s: 1.0             # GPS gecikme telafisi: hedef fazı omega*lead kadar öne alınır
   wait_for_lock: true          # ilk yörünge kilidine kadar hover'da bekle, sonra harekete geç
 

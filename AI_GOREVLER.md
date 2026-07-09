@@ -4,7 +4,7 @@
   Firefly görev durumunun OTORİTE listesi. Bir görevi tamamladığında/ele
   aldığında bu dosyayı GÜNCELLE (kutuyu işaretle, tarih düş). Kod tabanını
   yeniden analiz etmeden önce buraya bak.
-  Kardeş dosyalar: AI_PROJE_OZETI.md, AI_DOSYA_YAPISI.md  |  Güncel: 2026-07-04
+  Kardeş dosyalar: AI_PROJE_OZETI.md, AI_DOSYA_YAPISI.md  |  Güncel: 2026-07-10
 ================================================================================
 -->
 
@@ -30,6 +30,23 @@ Efsane: `[x]` tamamlandı · `[~]` kısmen/devam ediyor · `[ ]` bekliyor
       `solve_intercept()`. Gerçek veride ~%3.5 kalıntı ile doğrulandı.
 
 ### Güdüm / Kontrol
+- [x] **Rota takip salınımı/savrulması düzeltildi** (2026-07-10, canlı sim):
+      `test_route_intercept.py` canlı takibinde 4 kök neden bulunup giderildi:
+      1. `nearest_phi` kuantizasyonu (0.5°≈220 cm carrot zıplaması) → parabolik
+         yerel iyileştirme eklendi (hata 0.5°→0.0036°).
+      2. `YawController` gyro yolunda sınırsız integral windup + runner'ın
+         yanlış alanı sıfırlaması → `int_limit` (150 deg·s) + `reset()` metodu.
+      3. Hız (catch) kanalı P-only + LPF gecikmesi → sönümsüz yuva salınımı
+         (hedefe 12-20 cm'e kadar tehlikeli dalışlar) → PD'ye çevrildi
+         (`catch_damp: 1.2`), halka taban hızı yerel elips hızı v(φ) oldu.
+      4. Cross-track band sınırında keskin mod geçişi (132 s'de 26 geçiş →
+         70 deg/s yaw patlamaları) → smoothstep ile sürekli harmanlama.
+      Ayrıca hız→pitch iç döngüsü limit-cycle'ı (kp 4.0→2.5, kd 0.1→0.35,
+      slew 30→45°/s) ve `kd_gyro` 0.002→0.004 (P:D=8.75) düzeltildi.
+      → Kilit-sonrası ölçüm (180 s canlı koşu, önce→sonra): yaw RMS 54.7→21.5
+        deg/s, savrulma 3.25→0.26 tur/dk, en yakın gerçek mesafe 20 cm
+        (neredeyse çarpışma)→1291 cm (güvenli yuva takibi), irtifa RMS ~70 cm.
+        Loglar: `tests/python/logs/{baseline,fixed_v1,fixed_v2}_20260710/`.
 - [x] PID çekirdeği ve pitch/yaw/throttle kontrolcüleri (`guidance/pid_*.py`).
 - [x] Mod geçiş mantığı yeniden yazıldı (dinamik yaw-telafili pitch ölçekleme).
 - [x] **Pursuit güdümü v2** (`guidance/pursuit_guidance.py`): canlı moddaki
@@ -46,6 +63,22 @@ Efsane: `[x]` tamamlandı · `[~]` kısmen/devam ediyor · `[ ]` bekliyor
 ### Görü (Vision)
 - [x] RF-DETR TensorRT/ONNX export araçları (`vision/rfdetr_inference/`).
 - [x] RF-DETR inference scriptleri (video, ekran yakalama, SAHI tiling).
+- [x] **SAHI + SORT-CSRT video tracking testi** (`tests/python/test_rfdetr_sahi_csrt.py`):
+      SAHI dilimlemeli RF-DETR tespit + SORT-CSRT çoklu nesne takibi. Faz bazlı
+      döngü: TESPIT (SAHI+RF-DETR) → TAKIP (sadece CSRT, yüksek FPS). (2026-07-09)
+- [x] **TRT + SAHI + CSRT + merkez kilitlenme + görsel servolama testi**
+      (`tests/python/test_rfdetr_trt_visual_servo.py`, 2026-07-10):
+      `run_rfdetr_tensorrt.py` altyapısı (TRTInferencer, sahi_predict,
+      ScreenCapture) + SORT-CSRT birleştirildi. Ekran merkezinde histerezisli
+      kilitlenme dörtgeni (`LockOnManager`: yapışkan track-ID seçimi, onay/
+      bırakma kare sayaçları). **G tuşu** ile açılıp kapanan görsel servolama
+      (`VisualServoController`): piksel hatası → FOV (125°) ile açı → LPF
+      (tau 0.12 s) → PD + smoothstep devreye-giriş rampası + kanal başına slew
+      limit → `drone_sdk.set_control_surfaces` (yaw/throttle/pitch; pitch cos
+      hizalama ölçekli). Servo kapalıyken hiçbir komut gönderilmez (sadece
+      görüntü işleme + kilit); hedef kaybında komutlar sıfıra söner, 1.5 s
+      sonra servo kendini kapatır. Canlı doğrulama bekliyor (simülatör + TRT
+      engine gerekli).
 
 ### GCS / Arayüz
 - [x] Web tabanlı yer kontrol istasyonu: `server.js` TCP↔WebSocket köprüsü,

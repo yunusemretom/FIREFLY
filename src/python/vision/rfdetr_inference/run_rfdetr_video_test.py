@@ -8,12 +8,12 @@ from rfdetr.assets.coco_classes import COCO_CLASSES
 # 1. Modelin Başlatılması
 # RF-DETR mimarisi, transformer tabanlı bir nesne tespit modelidir.
 model = RFDETRSmall(
-    pretrain_weights="/home/tom/Downloads/checkpoint_best_regular.pth"
+    pretrain_weights="/home/tom/Downloads/checkpoint_best_regular (09.08.16).pth"
 )
 
 
 # Görselleştirme (OpenCV/Supervision) için numpy dizisi gereklidir (BGR)
-cap = cv2.VideoCapture("/home/tom/Downloads/istockphoto-2179703365-640_adpp_is.mp4")
+cap = cv2.VideoCapture("/home/tom/2026-07-10 00-12-13.mkv")
 
 if not cap.isOpened():
     raise RuntimeError("Video acilamadi. Dosya yolunu kontrol edin.")
@@ -61,7 +61,7 @@ label_annotator = sv.LabelAnnotator()
 # FPS hesaplama icin zaman tutucu
 prev_time = time.perf_counter()
 fps = 0.0
-fps_smoothing = 0.9
+fps_smoothing = 0.4
 
 while True:
     ret, image_cv2 = cap.read()

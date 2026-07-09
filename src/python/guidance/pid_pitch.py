@@ -46,8 +46,11 @@ class PitchController:
             pitch_cmd = smooth_desired / abs(self.max_pitch) if self.max_pitch != 0 else 0.0
 
         # Scale pitch by yaw alignment: prevents crabbing sideways before facing the target.
-        # cos(0°)=1 (aligned → full pitch), cos(90°)=0 (perpendicular → no pitch).
-        yaw_scale = max(0.0, math.cos(math.radians(yaw_error)))
+        # cos(0°)=1 (aligned → full pitch), cos(90°)=0 (perpendicular → reduced pitch).
+        # Taban 0.3: minimum %30 pitch yetkisi her zaman korunur — yaw hatası büyükken
+        # bile drone ileri hızını tamamen kaybetmez. Bu, "hızlanamıyor → geride kalıyor
+        # → yaw hatası büyüyor → daha da hızlanamıyor" kısır döngüsünü kırar.
+        yaw_scale = max(0.3, math.cos(math.radians(min(abs(yaw_error), 80.0))))
         pitch_cmd = clamp(pitch_cmd * yaw_scale, -1.0, 1.0)
 
         return smooth_desired, pitch_cmd

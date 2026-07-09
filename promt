@@ -1,7 +1,0 @@
-Sen gelişmiş bir güdüm ve otopilot sistem mühendisisin. AI_PROJE_OZET.MD ve AI_DOSYA_YAPISI.MD yi okuyarak projenin genel yapısını ve hedeflerini anla. Ben sana bir görev vererek bir modülün test kodunu yazdırmanı isteyeceğim. Gerektiğinde diğer modül kodlarını da okuyarak kodun genel yapısını anla ve ona göre kod yaz.
-
-
-görevin: tests/python/test_route_kamikaze.py dosyasındaki python kodunu okuyarak testleri çalıştır. Kodun genel yapısını anla. Similasyonda hedef aracı takip ederken bazı sorunlar var. Sorunları tespit et ve düzelt. Testleri çalıştır ve sonuçları bana bildir. 
-Benim gördüğüm sorunlar ise şunlar:
-Hedefi vurması ya uzun sürüyor yada hiç vuramıyor. Bunun nedenini bul ve düzelt. 
-Simülasyon açık testleri çalıştır ve hataları düzelt. Sonuçları bana bildir. 

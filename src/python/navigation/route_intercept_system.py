@@ -144,14 +144,28 @@ class EllipseRouteModel:
 
     def nearest_phi(self, x, y, n_search=360):
         """Verilen (x,y) noktasina elips uzerinde en yakin faz acisini bulur
-        (kaba arama + yerel iyilestirme)."""
+        (kaba arama + parabolik yerel iyilestirme).
+
+        Iyilestirme olmadan phi 2*pi/n_search adimlarla kuantalanir; carrot/
+        guide noktasi ~200 cm basamaklarla ziplar ve yaw komutuna jitter girer.
+        """
         phis = np.linspace(-np.pi, np.pi, n_search, endpoint=False)
         xt = self.a * np.cos(phis)
         yt = self.b * np.sin(phis)
         ex = self.cx + xt * np.cos(self.theta) - yt * np.sin(self.theta)
         ey = self.cy + xt * np.sin(self.theta) + yt * np.cos(self.theta)
         d2 = (ex - x)**2 + (ey - y)**2
-        return phis[np.argmin(d2)]
+        i = int(np.argmin(d2))
+        # Parabolik interpolasyon: komsu iki ornekle alt-adim dogruluk
+        step = 2 * np.pi / n_search
+        d_prev = d2[(i - 1) % n_search]
+        d_next = d2[(i + 1) % n_search]
+        denom = d_prev - 2.0 * d2[i] + d_next
+        offset = 0.0
+        if denom > 1e-12:
+            offset = 0.5 * (d_prev - d_next) / denom
+            offset = max(-0.5, min(0.5, offset))
+        return float(phis[i] + offset * step)
 
     def point_on_ellipse(self, phi):
         """Verilen faz açısı için elips üzerindeki (x, y) koordinatını döndürür."""

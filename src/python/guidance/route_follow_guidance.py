@@ -52,6 +52,11 @@ class RouteFollowGuidance:
         self.chase_max = config["pursuit"]["max_speed_cms"]
         self.min_speed = config["pursuit"]["min_speed_cms"]
         self.catch_gain = float(ri.get("catch_gain", 0.6))
+        # catch_damp: yay farkı türevine (kapanma hızına) sönümleme. P-only
+        # kanal (LPF + hız PID gecikmesiyle) yuva etrafında sönümsüz salınım
+        # üretiyordu: v_des std ~800 cm/s, mesafe p2p ~40 m ölçüldü.
+        self.catch_damp = float(ri.get("catch_damp", 1.2))
+        self.arc_tau_s = float(ri.get("arc_tau_s", 0.5))
         self.ring_v_auth = float(ri.get("ring_v_auth_cms", 1100.0))
         self.ri_follow_cm = float(ri.get("follow_distance_cm", 800.0))
         self.lead_time_s = float(ri.get("lead_time_s", 1.0))
@@ -59,8 +64,9 @@ class RouteFollowGuidance:
         self.cross_track_band = float(ri.get("cross_track_band_cm", 2000.0))
 
         self.arc_filt = None    # yuvaya yay farkı LPF durumu (hız kanalı)
+        self.arc_rate = 0.0     # filtreli yay farkı türevi (cm/s)
 
-    def guide(self, route, dx, dy, tx, ty):
+    def guide(self, route, dx, dy, tx, ty, dt=0.02):
         """Aktif (fit edilmiş) rota + dron konumu + gated hedef konumundan
         güdüm noktası üretir.
 
@@ -84,41 +90,69 @@ class RouteFollowGuidance:
         near_x, near_y = route.point_on_ellipse(drone_phi)
         cross_track_err = math.hypot(dx - near_x, dy - near_y)
 
-        if cross_track_err <= self.cross_track_band:
-            # HALKA ÜZERİNDE — pure pursuit carrot, kerteriz asla çökmez
-            carrot_phi = drone_phi + dir_sign * self.lookahead_phi
-            gx, gy = route.point_on_ellipse(carrot_phi)
-            guide_x, guide_y = float(gx), float(gy)
+        # --- HALKA kanalı (daima hesaplanır) ---------------------------
+        # pure pursuit carrot: daima dronun fazının ilerisinde, kerteriz çökmez
+        carrot_phi = drone_phi + dir_sign * self.lookahead_phi
+        cx_, cy_ = route.point_on_ellipse(carrot_phi)
 
-            # Yetişme = hız kanalı: yuvaya işaretli faz farkı → yay → hız
-            gap = slot_phi - drone_phi
-            while gap > math.pi:
-                gap -= 2 * math.pi
-            while gap < -math.pi:
-                gap += 2 * math.pi
-            ahead_arc = dir_sign * gap * r_eff
-            # Yuva fazı 1 Hz GPS gürültüsüyle titrer → ~1 s LPF (yalnızca hız
-            # kanalı; dümen carrot'u dron konumuna bağlı, zaten temiz).
-            if self.arc_filt is None:
-                self.arc_filt = ahead_arc
-            self.arc_filt += 0.02 * (ahead_arc - self.arc_filt)
+        # Yetişme = hız kanalı: yuvaya işaretli faz farkı → yay → hız
+        gap = slot_phi - drone_phi
+        while gap > math.pi:
+            gap -= 2 * math.pi
+        while gap < -math.pi:
+            gap += 2 * math.pi
+        ahead_arc = dir_sign * gap * r_eff
+        # Yuva fazı 1 Hz GPS gürültüsüyle titrer → LPF (yalnızca hız
+        # kanalı; dümen carrot'u dron konumuna bağlı, zaten temiz).
+        # Türev, LPF ÇIKIŞINDAN alınır (zaten pürüzsüz) → PD sönümleme.
+        alpha = 1.0 - math.exp(-dt / max(self.arc_tau_s, 1e-3))
+        if self.arc_filt is None:
+            self.arc_filt = ahead_arc
+        prev_filt = self.arc_filt
+        self.arc_filt += alpha * (ahead_arc - self.arc_filt)
+        raw_rate = (self.arc_filt - prev_filt) / max(dt, 1e-3)
+        self.arc_rate += 0.1 * (raw_rate - self.arc_rate)
 
-            v_route = abs(route.omega) * r_eff
-            if not (500.0 <= v_route <= self.chase_max):
-                v_route = self.nominal_target_speed
-            catch = max(-self.ring_v_auth,
-                        min(self.ring_v_auth, self.catch_gain * self.arc_filt))
-            ring_v_des = v_route + catch
+        # Halka taban hızı: elipste yol hızı sabit değildir —
+        # v(φ)=|ω|·√(a²sin²φ+b²cos²φ), a/b=1.5'te ±%20 oynar. Ortalama
+        # (|ω|·r_eff) kullanmak hız kanalına periyodik bozucu sokuyordu;
+        # dronun bulunduğu fazdaki YEREL hız kullanılır.
+        sin_p, cos_p = math.sin(drone_phi), math.cos(drone_phi)
+        v_route = abs(route.omega) * math.hypot(route.a * sin_p, route.b * cos_p)
+        if not (500.0 <= v_route <= self.chase_max):
+            v_route = self.nominal_target_speed
+        catch = self.catch_gain * self.arc_filt + self.catch_damp * self.arc_rate
+        catch = max(-self.ring_v_auth, min(self.ring_v_auth, catch))
+        v_ring = v_route + catch
+
+        # --- YAKLAŞMA kanalı + SÜREKLİ harmanlama ----------------------
+        # Eski keskin if/else (band içi: carrot, band dışı: yuva noktası)
+        # band sınırında MOD TİTREŞİMİ üretiyordu: canlı koşuda 132 s'de 26
+        # sınır geçişi ölçüldü; her geçişte guide noktası ve hız formülü
+        # zıplayıp yaw patlaması (70 deg/s RMS pencereleri) tetikliyordu.
+        # w: 0 = tam halka modu, 1 = tam yaklaşma modu; smoothstep ile sürekli.
+        w = (cross_track_err - self.cross_track_band) / self.cross_track_band
+        w = max(0.0, min(1.0, w))
+        w = w * w * (3.0 - 2.0 * w)
+
+        if w <= 0.0:
+            guide_x, guide_y = float(cx_), float(cy_)
+            ring_v_des = v_ring
         else:
-            # HALKAYA YAKLAŞMA: yuva noktasına git; sapma büyüdükçe en yakın
-            # halka noktasına doğru blend
-            gx, gy = route.point_on_ellipse(slot_phi)
-            guide_x, guide_y = float(gx), float(gy)
-            excess = cross_track_err - self.cross_track_band
-            blend = min(1.0, excess / (self.cross_track_band * 2.0))
-            guide_x = guide_x * (1.0 - blend) + near_x * blend
-            guide_y = guide_y * (1.0 - blend) + near_y * blend
-            ring_v_des = None
+            # yaklaşma noktası: yuva noktası, sapma büyüdükçe en yakın halka
+            # noktasına doğru kayar
+            sx, sy = route.point_on_ellipse(slot_phi)
+            far_blend = min(1.0, (cross_track_err - self.cross_track_band)
+                            / (self.cross_track_band * 2.0))
+            ax = float(sx) * (1.0 - far_blend) + near_x * far_blend
+            ay = float(sy) * (1.0 - far_blend) + near_y * far_blend
+            guide_x = float(cx_) * (1.0 - w) + ax * w
+            guide_y = float(cy_) * (1.0 - w) + ay * w
+            # hız da harmanlanır: yaklaşma hızı guide mesafesinden çizilir
+            dist_g = math.hypot(guide_x - dx, guide_y - dy)
+            v_appr = (self.nominal_target_speed
+                      + self.catch_gain * (dist_g - self.follow_dist_cm))
+            ring_v_des = v_ring * (1.0 - w) + v_appr * w
 
         return guide_x, guide_y, ring_v_des
 
