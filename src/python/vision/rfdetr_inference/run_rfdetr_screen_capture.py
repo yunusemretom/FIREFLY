@@ -1,3 +1,4 @@
+#! /usr/bin/env python3
 import time
 
 import cv2
@@ -13,7 +14,7 @@ COCO_CLASSES = {
         4: "rocket",
         5: "missile"}
 
-MODEL_WEIGHTS = "/home/tom/Downloads/rf_detr_colab_25_04_2026.pth"
+MODEL_WEIGHTS = "/home/tom/Downloads/checkpoint_best_regular (4).pth"
 CONF_THRESHOLD = 0.5
 RESIZE_SCALE = 0.5
 MONITOR_INDEX = 1  # 1 = ana ekran

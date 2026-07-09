@@ -31,7 +31,7 @@ slew:
 
 # --- 5-metre arkadan takip güdümü ---
 pursuit:
-  follow_distance_cm: 300.0  # hedefin kaç cm arkasında kal (5 m)
+  follow_distance_cm: 2000.0  # hedefin kaç cm arkasında kal (5 m)
 
   # Dış döngü PID: imzalı mesafe hatası (cm) → hız düzeltmesi
   #   100 cm geride → +15 cm/s, 500 cm → +75 cm/s, 2000 cm → +300 cm/s
@@ -51,7 +51,7 @@ pursuit:
 
 # --- Rota tabanlı takip (tests/python/test_route_intercept.py canlı takipçi) ---
 route_intercept:
-  lock_stable_laps: 3          # bu kadar tur üst üste kilitlendikten sonra rota dondurulur
+  lock_stable_laps: 4          # bu kadar tur üst üste kilitlendikten sonra rota dondurulur
   follow_distance_cm: 2000.0    # hedefin bu kadar (cm) arkasındaki takip yuvası izlenir
   lookahead_phi: 0.25          # halka üstünde carrot'un dronun önündeki fazı (rad)
   cross_track_band_cm: 2000.0  # elipse çekme bandı (cm)
@@ -60,3 +60,22 @@ route_intercept:
   ring_v_auth_cms: 1100.0      # halka üstü hız düzeltme yetkisi (± cm/s)
   lead_time_s: 1.0             # GPS gecikme telafisi: hedef fazı omega*lead kadar öne alınır
   wait_for_lock: true          # ilk yörünge kilidine kadar hover'da bekle, sonra harekete geç
+
+# --- Kamikaze taarruz güdümü (tests/python/test_route_kamikaze.py) ---
+# Takip yerine hedefi rota üzerinde en erken yakalama (lead intercept)
+# noktasında VURUR. Yuva/takip mesafesi yok; tam hızla çarpışmaya dalar.
+route_kamikaze:
+  # DİKKAT: taarruz hızı hedef hızının (~1500-1800 cm/s) belirgin ÜSTÜNDE
+  # olmalı; 1800'de kapanma hızı ~0 kalır, intercept çözümü bulunamaz ve
+  # dron hedefi asla vuramaz (150 s'de 8 teğet geçiş, 0 çarpışma ölçüldü).
+  attack_speed_cms: 2800.0     # taarruz hızı (dron tam hız kapanma)
+  terminal_range_cm: 3000.0    # terminal dalış bu menzilde kademeli başlar (1000'de alçalmaya vakit kalmıyor)
+  hit_radius_cm: 500.0         # rapor metriği: en yakın geçiş bu yarıçapla kıyaslanır
+  lead_time_s: 1.0             # GPS gecikme telafisi (solve_intercept saatine eklenir)
+  wait_for_lock: true          # ilk yörünge kilidine kadar hover'da bekle, sonra taarruza geç
+  lock_stable_laps: 4          # bu kadar tur kilit sonrası rota dondurulur (kararlı intercept)
+  # Terminal dalış bias'ı: eski davranış (400) dronu daima hedef irtifasının
+  # ALTINA nişanlatıyordu — oysa ölçümde dron zaten zamanın %70'inde hedefin
+  # ALTINDA kalıyor; bias ıskalayı büyütüyordu. 0 = eş-irtifa (hedefin gerçek
+  # yüksekliğine dal), çarpışmayı dikeyde ortalar.
+  terminal_descent_cm: 0.0

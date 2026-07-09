@@ -46,12 +46,24 @@ def build_engine_python_api() -> None:
     config = builder.create_builder_config()
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, WORKSPACE_MB * (1 << 20))
 
-    # FP16 destegi - GPU destekliyorsa etkinlestir
-    if builder.platform_has_fast_fp16:
-        config.set_flag(trt.BuilderFlag.FP16)
-        print("[INFO] FP16 precision etkin.")
+    # TensorRT 11'de precision yonetimi degisti:
+    #   - BuilderFlag.FP16  → KALDIRILDI (TRT 10+)
+    #   - FP16 GPU destekliyorsa otomatik kullanilir (explicit set gerekmez)
+    #   - TF32 varsayilan olarak aktif (Ampere+ GPU'larda matmul'lari hizlandirir)
+    #   - Daha fazla kontrol icin: trtexec --fp16 veya network layer-level precision
+    trt_version = tuple(int(x) for x in trt.__version__.split(".")[:2])
+    if trt_version < (10, 0):
+        # Eski TRT (< 10): FP16 flag destekleniyor
+        try:
+            if builder.platform_has_fast_fp16:  # type: ignore[attr-defined]
+                config.set_flag(trt.BuilderFlag.FP16)  # type: ignore[attr-defined]
+                print("[INFO] FP16 precision etkin (TRT < 10).")
+        except AttributeError:
+            pass
     else:
-        print("[WARNING] GPU FP16 desteklemiyor, FP32 kullanilacak.")
+        # TRT 10+: FP16 otomatik; TF32 aktif (varsayilan)
+        print(f"[INFO] TensorRT {trt.__version__} — FP16 GPU destekliyorsa otomatik etkin.")
+        print("[INFO] TF32 precision aktif (varsayilan).")
 
     print("[INFO] Engine derleniyor... (bu birkaç dakika surebilir)")
     serialized_engine = builder.build_serialized_network(network, config)

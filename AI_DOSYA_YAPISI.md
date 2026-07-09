@@ -3,7 +3,7 @@
   YAPAY ZEKA ARAÇLARI İÇİN NOT (AI ASSISTANT DIRECTIVE)
   Bu dosya, Firefly kod tabanının OTORİTE dosya haritasıdır. Kod tabanını
   baştan taramak yerine burayı oku. Kodu değiştirdiğinde bu haritayı güncelle.
-  Kardeş dosyalar: AI_PROJE_OZETI.md, AI_GOREVLER.md   |   Güncel: 2026-07-04
+  Kardeş dosyalar: AI_PROJE_OZETI.md, AI_GOREVLER.md   |   Güncel: 2026-07-07
 ================================================================================
 -->
 
@@ -38,12 +38,15 @@ Firefly/
 │   ├── navigation/                        # Sensör füzyonu / hedef durum kestirimi
 │   │   ├── fixed_wing_tracker.py   ⭐ CTRV UKF tracker (7 durum) — ANA takip
 │   │   ├── route_intercept_system.py ⭐ Elips rota fit + RoutePlanner + intercept
+│   │   ├── orbit_lock.py           ⭐ OrbitLockTracker: tur tespiti + kilitle/dondur
+│   │   ├── telemetry_conditioner.py ⭐ MeasurementGate + AltitudeLock (stale-hold koşullandırma)
 │   │   ├── ekf.py                  ⭐ Config-driven CTRV EKF (5 durum, analitik Jacobian)
 │   │   ├── ekf_deneme.py           🧪 EKF deneme/geliştirme sürümü
 │   │   └── simulate_1hz_test.py    🧪 1 Hz koşulu: UKF vs CV Kalman kıyası
 │   │
 │   ├── guidance/                          # Güdüm + kontrol
 │   │   ├── pursuit_guidance.py     ⭐ v2: Gate + LeadSmoother + YawController
+│   │   ├── route_follow_guidance.py ⭐ Elips rota takip güdümü (carrot + hız kanalı) + GuidePointSlewLimiter
 │   │   ├── mode_manager.py         🗂️ Uçuş modu geçiş mantığı (iskelet)
 │   │   ├── pid_core.py             ⭐ Genel PID çekirdeği
 │   │   ├── pid_pitch.py            ⭐ Pitch kontrolcüsü
@@ -83,7 +86,9 @@ Firefly/
 │   ├── python/
 │   │   ├── test_fixed_wing_tracker.py  🧪 UKF tracker testi
 │   │   ├── test_ekf.py                 🧪 EKF testi (loiter sim + matplotlib)
-│   │   ├── test_route_intercept.py     🧪 Rota fit + intercept testi
+│   │   ├── test_route_intercept.py     🧪 Rota takip testi (İNCE harness; modüllerden çeker)
+│   │   ├── test_route_kamikaze.py      🧪 Rota kamikaze taarruz testi (faz-demirli intercept)
+│   │   ├── route_viz.py                🔧 Ortak test görselleştirme (tema+pano+elips sim hedefi)
 │   │   ├── test_pursuit_smoothing.py   🧪 Canlı-koşul emülasyon harness (A/B/C)
 │   │   ├── test_pursuit_live.py        ⭐🧪 Düzeltilmiş CANLI pursuit runner
 │   │   └── pursuit_guidance (1).py     ⚠️ v1 (dalgalı yol) — referans/kıyas

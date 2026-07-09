@@ -11,7 +11,7 @@
          - AI_GOREVLER.md                  → yapılan / yapılacak görevler
     2. Bu dosyalar güncel değilse veya kodla çeliştiğini fark edersen, ilgili
        satırı doğrula ve GÜNCELLE — böylece bir sonraki araç tekrar taramasın.
-  Son güncelleme: 2026-07-04
+  Son güncelleme: 2026-07-07
 ================================================================================
 -->
 
@@ -125,13 +125,25 @@ Hedef tekrarlayan rota izlediğinden, her ölçümü bağımsız tahmin etmek ye
   otomatik yeniden fit.
 - `solve_intercept()` — dronun sabit hızıyla hedefi rota üzerinde en erken
   yakalayacağı zaman/nokta (lead pursuit çözümü).
-- **Canlı takipçi** (`tests/python/test_route_intercept.py`): sim_bridge ile
-  aynı guidance kontrolcülerini (Yaw/Pitch/ThrottleController) kullanır. Halka
+
+**Modüler güdüm katmanı** (canlı takip mantığı artık test dosyasından çıkarıldı,
+tekrar kullanılabilir modüllerde):
+- `navigation/telemetry_conditioner.py` — `MeasurementGate` (stale-hold'a karşı
+  değişim tespiti + sıçrama reddi + bayatlık) ve `AltitudeLock` (sıçrama reddeden
+  irtifa ortalaması / eş-irtifa kilidi).
+- `navigation/orbit_lock.py` — `OrbitLockTracker`: işaretli faz birikimiyle 360°
+  tur tespiti, robust re-fit, kilitle/dondur durum makinesi. `period_coverage`
+  guard'ı (opsiyonel) <1 turluk çöp fit'i reddeder (kamikaze'de gerekli;
+  intercept'te 0 = klasik davranış).
+- `guidance/route_follow_guidance.py` — `RouteFollowGuidance` (halka üstü carrot
+  pure-pursuit + ayrışık hız kanalı) + `GuidePointSlewLimiter`.
+- **Canlı takipçi** (`tests/python/test_route_intercept.py`): artık **ince bir
+  harness** — yukarıdaki modülleri + Yaw/Pitch/ThrottleController'ı bağlar. Halka
   üzerinde dümen **pure pursuit** carrot'uyla (dronun fazının önünde), hedefe
   yetişme ise yuvaya faz farkından **hız kanalıyla** yapılır — sabit noktayı
-  kovalamak kerteriz çöküşü + 360° dönüş üretiyordu. Hedef irtifası sıçrama
-  reddi olan ortalamayla kilitlenir; bayat/bozuk GPS'te düz uçuşa geçilir.
-  `--headless --duration N` ile GUI'siz koşup CSV + rapor PNG üretir.
+  kovalamak kerteriz çöküşü + 360° dönüş üretiyordu. `--headless --duration N`
+  ile GUI'siz koşup CSV + rapor PNG üretir. Ortak matplotlib tema/pano/elips-sim
+  hedefi `tests/python/route_viz.py`'de.
 
 ### 3.4 CTRV EKF (alternatif) — `navigation/ekf.py`
 Config-driven (`config/ekf_params.yaml → ctrv_ekf`) 5 durumlu EKF

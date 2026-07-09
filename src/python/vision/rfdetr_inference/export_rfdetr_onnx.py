@@ -1,13 +1,23 @@
+from pathlib import Path
+
 from rfdetr import RFDETRSmall
+
+OUTPUT_DIR  = Path("/home/tom/Documents/Projeler/Firefly/object_detection")
+OUTPUT_NAME = "inference_model.onnx"
 
 
 def main() -> None:
-    model = RFDETRSmall(pretrain_weights="/home/tom/Downloads/checkpoint_best_regular (1).pth")
-    model.export(
-        output_dir="/home/tom/Documents/Projeler/Firefly/object_detection",
-        output_file_name="inference_model.onnx",
-    )
-    print("ONNX export tamamlandi: object_detection/inference_model.onnx")
+    model = RFDETRSmall(pretrain_weights="/home/tom/Downloads/checkpoint_best_regular (6).pth")
+
+    # export() sadece output_dir alir; dosyayi model.onnx olarak kaydeder
+    result_path: Path = model.export(output_dir=str(OUTPUT_DIR))
+
+    # istenen isimle yeniden adlandir
+    target = OUTPUT_DIR / OUTPUT_NAME
+    if result_path != target:
+        result_path.rename(target)
+
+    print(f"ONNX export tamamlandi: {target}")
 
 
 if __name__ == "__main__":
