@@ -56,3 +56,5 @@ Drones of War Teknofest/
 Promtlar.md
 *.onnx
 *.engine
+*.pt
+*.pth
