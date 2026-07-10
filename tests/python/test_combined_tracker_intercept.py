@@ -78,11 +78,14 @@ OUTPUT_PATH    = (
 )
 
 # Algılama Modeli Eşik Değeri
-DET_CONF_THRESHOLD = 0.45
+DET_CONF_THRESHOLD = 0.50
 
 # Maksimum hedef alan oranı (kare alanına göre oran)
 # Bu orandan daha büyük alan kaplayan hedefler takibe alınmaz.
-MAX_TARGET_AREA_RATIO = 0.09
+MAX_TARGET_AREA_RATIO = 0.07
+
+# Maksimum takip mesafesi (cm) — Hedef bu mesafeden uzaksa takip sıfırlanır
+MAX_TRACKING_DISTANCE_CM = 2000.0  # 20 metre
 
 # Kilitlenme Dörtgeni Sınır Oranları ( Acquisition / Lock Zone )
 LOCK_ROI_Y_BORDER = 0.10  # Üstten ve alttan bırakılacak boşluk oranı (%10)
@@ -96,7 +99,7 @@ TRACK_DURATION  = 4.0   # TCTrack takip fazi suresi
 TRACKER_LOST_SCORE = 0.70
 
 # Görsel servo sırasında korunacak pitch açısı (derece, öne doğru)
-SERVO_ATTACK_PITCH_DEG = 5.0
+SERVO_ATTACK_PITCH_DEG = -25.0
 
 # ─── Renkler (BGR) ───────────────────────────────────────────────────────────
 COL_DETR      = (0, 220, 90)    # yeşil  – tespit kutusu
@@ -158,7 +161,7 @@ class ThrottlePID:
         self.prev_err = err
         output = self.Kp * err + self.Ki * self.integral + self.Kd * deriv
         return max(-0.9, min(0.9, output))
-        
+        15
     def reset(self):
         self.integral = 0.0
         self.prev_err = 0.0
@@ -250,6 +253,27 @@ def draw_hud(
 
     # Yardım
     put_text_bg(frame, "Q: Cikis | R: Sifirla", (w - 200, h - 15), scale=0.5)
+
+
+def get_dashboard_image(dash: Optional[LiveDashboard]) -> Optional[np.ndarray]:
+    """Matplotlib figürünü BGR numpy array (OpenCV görüntüsü) olarak döner."""
+    if dash is None or dash.fig is None:
+        return None
+    try:
+        fig = dash.fig
+        fig.canvas.draw()
+        if hasattr(fig.canvas, "buffer_rgba"):
+            rgba = np.asarray(fig.canvas.buffer_rgba())
+            bgr = cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
+        else:
+            w_fig, h_fig = fig.canvas.get_width_height()
+            rgba = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            rgb = rgba.reshape((h_fig, w_fig, 3))
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        return bgr
+    except Exception as e:
+        print(f"[WARN] Harita goruntusu alinamadi: {e}")
+        return None
 
 
 def load_tctrack() -> tuple[TCTrackTracker, list]:
@@ -475,6 +499,8 @@ def main():
     in_track = False                   # False → TESPIT, True → TAKIP
     track_xyxy: Optional[np.ndarray] = None
     track_lost = False
+    lost_frame_count = 0
+    MAX_LOST_FRAMES = 4               # anlık takip kayıpları için tolerans kare sayısı
 
     # ═════════════════════════════════════════════════════════════════════════
     #  SİMÜLASYON MODU (--sim)
@@ -549,6 +575,7 @@ def main():
                         in_track = True
                         track_lost = False
                         track_xyxy = init_box.copy()
+                        lost_frame_count = 0
 
                         cls_name = CLASS_NAMES.get(int(init_cls), str(init_cls))
                         print(f"[INFO] TAKIP fazina gecildi — {cls_name} conf={best_conf:.2f} bbox={init_xywh}")
@@ -565,15 +592,17 @@ def main():
                     tc_score = float(tc_out["best_score"])
                     tc_xyxy = xyxy_from_tc(tc_out["bbox"])
 
-                    track_lost = tc_score < TRACKER_LOST_SCORE
+                    current_lost = tc_score < TRACKER_LOST_SCORE
 
-                    if not track_lost:
+                    if not current_lost:
                         bw = tc_xyxy[2] - tc_xyxy[0]
                         bh = tc_xyxy[3] - tc_xyxy[1]
                         if (bw * bh) / (h * w) > MAX_TARGET_AREA_RATIO:
-                            track_lost = True
+                            current_lost = True
 
-                    if not track_lost:
+                    if not current_lost:
+                        lost_frame_count = 0
+                        track_lost = False
                         track_xyxy = tc_xyxy.copy()
                         x1, y1, x2, y2 = int(tc_xyxy[0]), int(tc_xyxy[1]), int(tc_xyxy[2]), int(tc_xyxy[3])
                         cv2.rectangle(frame, (x1, y1), (x2, y2), COL_TRACK, 3)
@@ -581,12 +610,20 @@ def main():
                         cv2.drawMarker(frame, (cx, cy), COL_TRACK, cv2.MARKER_CROSS, 20, 2, cv2.LINE_AA)
                         put_text_bg(frame, f"TC: {tc_score:.2f}", (x1, y1 - 2), scale=0.6, fg=COL_TRACK)
                     else:
-                        if track_xyxy is not None:
-                            overlay = frame.copy()
-                            x1, y1, x2, y2 = (int(v) for v in track_xyxy)
-                            cv2.rectangle(overlay, (x1, y1), (x2, y2), COL_LOST, 2)
-                            cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
-                        put_text_bg(frame, "HEDEF KAYBOLDU", (w // 2 - 90, h // 2), scale=0.8, fg=COL_LOST)
+                        lost_frame_count += 1
+                        if lost_frame_count >= MAX_LOST_FRAMES:
+                            track_lost = True
+                        else:
+                            track_lost = False
+                            if track_xyxy is not None:
+                                overlay = frame.copy()
+                                x1, y1, x2, y2 = (int(v) for v in track_xyxy)
+                                cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 165, 255), 2)
+                                cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
+                                put_text_bg(frame, f"GECICI KAYIP ({lost_frame_count}/{MAX_LOST_FRAMES})", 
+                                            (x1, y1 - 2), scale=0.6, fg=(0, 165, 255))
+                            else:
+                                put_text_bg(frame, "GECICI KAYIP", (w // 2 - 90, h // 2), scale=0.8, fg=(0, 165, 255))
 
                     # Süresiz takip durumunda durum çubuğu çizilir
                     cv2.rectangle(frame, (0, 0), (w, 8), COL_TRACK, -1)
@@ -633,6 +670,15 @@ def main():
                     planner.add_observation(t, tx_noisy, ty_noisy)
 
                 dx, dy = drone_x_log[-1], drone_y_log[-1]
+
+                target_dist_3d = math.hypot(tx_real - dx, ty_real - dy)
+                if in_track and target_dist_3d > MAX_TRACKING_DISTANCE_CM:
+                    print(f"[INFO] Hedef cok uzaklasti ({target_dist_3d/100.0:.1f}m > {MAX_TRACKING_DISTANCE_CM/100.0:.0f}m). TESPIT fazina donuluyor.")
+                    in_track = False
+                    track_xyxy = None
+                    track_lost = False
+                    lost_frame_count = 0
+                    phase_start = time.perf_counter()
 
                 intercept_pt = None
                 if planner.route.fitted:
@@ -718,9 +764,9 @@ def main():
         guidance = RouteFollowGuidance(pid_config)
 
         # Görsel servo PID kontrolcüleri (Yumuşatılmış / Soften edilmiş kazançlar)
-        size_pid = SizePID(Kp=0.003, Ki=0.0001, Kd=0.001)
-        thr_pid = ThrottlePID(Kp=0.75, Ki=0.01, Kd=0.10)
-        yaw_pid = YawPID(Kp=0.40, Ki=0.01, Kd=0.08)
+        size_pid = SizePID(Kp=0.03, Ki=0.0001, Kd=0.001)
+        thr_pid = ThrottlePID(Kp=0.85, Ki=0.01, Kd=0.10)
+        yaw_pid = YawPID(Kp=0.60, Ki=0.01, Kd=0.08)
 
         ri_cfg = pid_config.get("route_intercept", {})
         NOMINAL_TARGET_SPEED = float(ri_cfg.get("nominal_target_speed_cms", 1700.0))
@@ -800,6 +846,7 @@ def main():
                             in_track = True
                             track_lost = False
                             track_xyxy = init_box.copy()
+                            lost_frame_count = 0
 
                             cls_name = CLASS_NAMES.get(int(init_cls), str(init_cls))
                             print(f"[INFO] TAKIP fazina gecildi — {cls_name} conf={best_conf:.2f} bbox={init_xywh}")
@@ -823,15 +870,17 @@ def main():
                     tc_score = float(tc_out["best_score"])
                     tc_xyxy = xyxy_from_tc(tc_out["bbox"])
 
-                    track_lost = tc_score < TRACKER_LOST_SCORE
+                    current_lost = tc_score < TRACKER_LOST_SCORE
 
-                    if not track_lost:
+                    if not current_lost:
                         bw = tc_xyxy[2] - tc_xyxy[0]
                         bh = tc_xyxy[3] - tc_xyxy[1]
                         if (bw * bh) / (h * w) > MAX_TARGET_AREA_RATIO:
-                            track_lost = True
+                            current_lost = True
 
-                    if not track_lost:
+                    if not current_lost:
+                        lost_frame_count = 0
+                        track_lost = False
                         track_xyxy = tc_xyxy.copy()
                         x1, y1, x2, y2 = int(tc_xyxy[0]), int(tc_xyxy[1]), int(tc_xyxy[2]), int(tc_xyxy[3])
                         cv2.rectangle(frame, (x1, y1), (x2, y2), COL_TRACK, 3)
@@ -839,12 +888,20 @@ def main():
                         cv2.drawMarker(frame, (cx, cy), COL_TRACK, cv2.MARKER_CROSS, 20, 2, cv2.LINE_AA)
                         put_text_bg(frame, f"TC: {tc_score:.2f}", (x1, y1 - 2), scale=0.6, fg=COL_TRACK)
                     else:
-                        if track_xyxy is not None:
-                            overlay = frame.copy()
-                            x1, y1, x2, y2 = (int(v) for v in track_xyxy)
-                            cv2.rectangle(overlay, (x1, y1), (x2, y2), COL_LOST, 2)
-                            cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
-                        put_text_bg(frame, "HEDEF KAYBOLDU", (w // 2 - 90, h // 2), scale=0.8, fg=COL_LOST)
+                        lost_frame_count += 1
+                        if lost_frame_count >= MAX_LOST_FRAMES:
+                            track_lost = True
+                        else:
+                            track_lost = False
+                            if track_xyxy is not None:
+                                overlay = frame.copy()
+                                x1, y1, x2, y2 = (int(v) for v in track_xyxy)
+                                cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 165, 255), 2)
+                                cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
+                                put_text_bg(frame, f"GECICI KAYIP ({lost_frame_count}/{MAX_LOST_FRAMES})", 
+                                            (x1, y1 - 2), scale=0.6, fg=(0, 165, 255))
+                            else:
+                                put_text_bg(frame, "GECICI KAYIP", (w // 2 - 90, h // 2), scale=0.8, fg=(0, 165, 255))
 
                     # Süresiz takip durumunda durum çubuğu çizilir
                     cv2.rectangle(frame, (0, 0), (w, 8), COL_TRACK, -1)
@@ -897,6 +954,15 @@ def main():
                 g = gate.update(t_now, tx_raw, ty_raw)
                 tx, ty = g.x, g.y
                 meas_changed, data_valid, data_stale = g.meas_changed, g.data_valid, g.data_stale
+
+                target_dist_3d = math.hypot(math.hypot(tx - dx, ty - dy), tz - dz)
+                if in_track and target_dist_3d > MAX_TRACKING_DISTANCE_CM:
+                    print(f"[INFO] Hedef cok uzaklasti ({target_dist_3d/100.0:.1f}m > {MAX_TRACKING_DISTANCE_CM/100.0:.0f}m). TESPIT fazina donuluyor.")
+                    in_track = False
+                    track_xyxy = None
+                    track_lost = False
+                    lost_frame_count = 0
+                    phase_start = time.perf_counter()
 
                 locked_alt = alt_lock.update(tz, meas_changed, data_valid)
                 if locked_alt is None:
@@ -1036,7 +1102,7 @@ def main():
                         blend_factor = (1500.0 - deviation) / 1000.0
                         
                     fy_final = blend_factor * fy_servo + (1.0 - blend_factor) * fy
-                    fp_final = blend_factor * fp_servo + (1.0 - blend_factor) * fp
+                    fp_final = fp_servo  # Algılama aktifken yavaşlama/durma yapmasın, sabit 5 derece ile ilerlesin
                     f_thr_final = blend_factor * f_thr_servo + (1.0 - blend_factor) * f_thr
                     
                     # Dokunma Kontrolü ve HUD üzerine bilgi yazdırma

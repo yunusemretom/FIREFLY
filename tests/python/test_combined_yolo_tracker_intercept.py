@@ -78,6 +78,9 @@ DET_CONF_THRESHOLD = 0.45
 # Bu orandan daha büyük alan kaplayan hedefler takibe alınmaz.
 MAX_TARGET_AREA_RATIO = 0.09
 
+# Maksimum takip mesafesi (cm) — Hedef bu mesafeden uzaksa takip sıfırlanır
+MAX_TRACKING_DISTANCE_CM = 20000.0  # 200 metre
+
 # Kilitlenme Dörtgeni Sınır Oranları ( Acquisition / Lock Zone )
 LOCK_ROI_Y_BORDER = 0.10  # Üstten ve alttan bırakılacak boşluk oranı (%10)
 LOCK_ROI_X_BORDER = 0.25  # Sağdan ve soldan bırakılacak boşluk oranı (%25)
@@ -86,7 +89,7 @@ LOCK_ROI_X_BORDER = 0.25  # Sağdan ve soldan bırakılacak boşluk oranı (%25)
 DETECT_DURATION = 1.0   # Algılama fazi suresi
 
 # TCTrack erken cikis esigi
-TRACKER_LOST_SCORE = 0.20
+TRACKER_LOST_SCORE = 0.70
 
 # Görsel servo sırasında korunacak pitch açısı (derece, öne doğru)
 SERVO_ATTACK_PITCH_DEG = 5.0
@@ -681,25 +684,15 @@ def main():
                 put_text_bg(frame, "KILIT ALANI", (lx1 + 8, ly1 + 22), scale=0.55, fg=COL_LOCK_ZONE)
 
                 # Video kayıt
-                combined = frame
-                if dash is not None:
-                    bgr_dash = get_dashboard_image(dash)
-                    if bgr_dash is not None:
-                        h_cam, w_cam = frame.shape[:2]
-                        h_dash, w_dash = bgr_dash.shape[:2]
-                        target_w = int(w_dash * (h_cam / h_dash))
-                        bgr_dash_resized = cv2.resize(bgr_dash, (target_w, h_cam), interpolation=cv2.INTER_LINEAR)
-                        combined = np.hstack((frame, bgr_dash_resized))
-
                 if video_writer is None:
-                    oh, ow = combined.shape[:2]
+                    oh, ow = frame.shape[:2]
                     video_writer = cv2.VideoWriter(OUTPUT_PATH, cv2.VideoWriter_fourcc(*"mp4v"), OUTPUT_FPS, (ow, oh))
                 if video_writer:
                     n_write = max(1, int(round(DT_LOOP * OUTPUT_FPS)))
                     for _ in range(n_write):
-                        video_writer.write(combined)
+                        video_writer.write(frame)
 
-                cv2.imshow(win_name, combined)
+                cv2.imshow(win_name, frame)
 
                 # ── 2. ROTA INTERCEPT SİMÜLASYONU ──────────────────────────────
                 tx_real, ty_real = ellipse_sim.truth(t)
@@ -712,6 +705,15 @@ def main():
                     planner.add_observation(t, tx_noisy, ty_noisy)
 
                 dx, dy = drone_x_log[-1], drone_y_log[-1]
+
+                target_dist_3d = math.hypot(tx_real - dx, ty_real - dy)
+                if in_track and target_dist_3d > MAX_TRACKING_DISTANCE_CM:
+                    print(f"[INFO] Hedef cok uzaklasti ({target_dist_3d/100.0:.1f}m > {MAX_TRACKING_DISTANCE_CM/100.0:.0f}m). TESPIT fazina donuluyor.")
+                    in_track = False
+                    track_xyxy = None
+                    track_lost = False
+                    lost_frame_count = 0
+                    phase_start = time.perf_counter()
 
                 intercept_pt = None
                 if planner.route.fitted:
@@ -959,25 +961,15 @@ def main():
                 put_text_bg(frame, "KILIT ALANI", (lx1 + 8, ly1 + 22), scale=0.55, fg=COL_LOCK_ZONE)
 
                 # Video kayıt
-                combined = frame
-                if dash is not None:
-                    bgr_dash = get_dashboard_image(dash)
-                    if bgr_dash is not None:
-                        h_cam, w_cam = frame.shape[:2]
-                        h_dash, w_dash = bgr_dash.shape[:2]
-                        target_w = int(w_dash * (h_cam / h_dash))
-                        bgr_dash_resized = cv2.resize(bgr_dash, (target_w, h_cam), interpolation=cv2.INTER_LINEAR)
-                        combined = np.hstack((frame, bgr_dash_resized))
-
                 if video_writer is None:
-                    oh, ow = combined.shape[:2]
+                    oh, ow = frame.shape[:2]
                     video_writer = cv2.VideoWriter(OUTPUT_PATH, cv2.VideoWriter_fourcc(*"mp4v"), OUTPUT_FPS, (ow, oh))
                 if video_writer:
                     n_write = max(1, int(round(dt * OUTPUT_FPS)))
                     for _ in range(n_write):
-                        video_writer.write(combined)
+                        video_writer.write(frame)
 
-                cv2.imshow(win_name, combined)
+                cv2.imshow(win_name, frame)
 
                 # ── 2. ROTA INTERCEPT CANLI SDK DÖNGÜSÜ ────────────────────────
                 t_data = drone.get_telemetry()
@@ -996,6 +988,15 @@ def main():
                 g = gate.update(t_now, tx_raw, ty_raw)
                 tx, ty = g.x, g.y
                 meas_changed, data_valid, data_stale = g.meas_changed, g.data_valid, g.data_stale
+
+                target_dist_3d = math.hypot(math.hypot(tx - dx, ty - dy), tz - dz)
+                if in_track and target_dist_3d > MAX_TRACKING_DISTANCE_CM:
+                    print(f"[INFO] Hedef cok uzaklasti ({target_dist_3d/100.0:.1f}m > {MAX_TRACKING_DISTANCE_CM/100.0:.0f}m). TESPIT fazina donuluyor.")
+                    in_track = False
+                    track_xyxy = None
+                    track_lost = False
+                    lost_frame_count = 0
+                    phase_start = time.perf_counter()
 
                 locked_alt = alt_lock.update(tz, meas_changed, data_valid)
                 if locked_alt is None:
@@ -1135,7 +1136,7 @@ def main():
                         blend_factor = (1500.0 - deviation) / 1000.0
                         
                     fy_final = blend_factor * fy_servo + (1.0 - blend_factor) * fy
-                    fp_final = blend_factor * fp_servo + (1.0 - blend_factor) * fp
+                    fp_final = fp_servo  # Algılama aktifken yavaşlama/durma yapmasın, sabit 5 derece ile ilerlesin
                     f_thr_final = blend_factor * f_thr_servo + (1.0 - blend_factor) * f_thr
                     
                     # Dokunma Kontrolü ve HUD üzerine bilgi yazdırma

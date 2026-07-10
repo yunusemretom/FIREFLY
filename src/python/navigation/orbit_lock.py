@@ -113,18 +113,19 @@ class OrbitLockTracker:
                     accept = False
                     reason = (f"veri {t_span:.0f}s < {self.period_coverage:.2f}·periyot "
                               f"({candidate.period:.0f}s) — kapsama yetersiz")
-                elif self.orbit_locked:
-                    # Dejenerelik: yön (omega işareti) ters dönmemeli, merkez
-                    # aşırı sıçramamalı; aksi halde eski kilit korunur.
-                    center_jump = math.hypot(
-                        candidate.cx - self.master_route.cx,
-                        candidate.cy - self.master_route.cy)
-                    if np.sign(candidate.omega) != np.sign(self.master_route.omega):
-                        accept = False
-                        reason = "yön (omega işareti) tutarsız"
-                    elif center_jump > self.outlier_threshold_cm:
-                        accept = False
-                        reason = f"merkez {center_jump:.0f}cm zıpladı"
+                # elif self.orbit_locked:
+                #     # Dejenerelik: yön (omega işareti) ters dönmemeli, merkez
+                #     # aşırı sıçramamalı; aksi halde eski kilit korunur.
+                #     center_jump = math.hypot(
+                #         candidate.cx - self.master_route.cx,
+                #         candidate.cy - self.master_route.cy)
+                #     if np.sign(candidate.omega) != np.sign(self.master_route.omega):
+                #         accept = False
+                #         reason = "yön (omega işareti) tutarsız"
+                #     elif center_jump > self.outlier_threshold_cm:
+                #         accept = False
+                #         reason = f"merkez {center_jump:.0f}cm zıpladı"
+                pass
 
                 if accept:
                     self.master_route = candidate
