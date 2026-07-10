@@ -73,30 +73,39 @@ TCTRACK_CONFIG = str(_TCTRACK_DIR / "experiments" / "TCTrack" / "config.yaml")
 TCTRACK_SNAP   = str(_TCTRACK_DIR / "snapshot" / "general_model.pth")
 
 MONITOR_INDEX  = 1
-RESIZE_SCALE   = 0.9
+RESIZE_SCALE   = 1.0
 OUTPUT_FPS     = 30.0
 OUTPUT_PATH    = (
     f"/home/tom/Documents/Projeler/DogFight/"
     f"rfdetr_tctrack_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
 )
 
+# Algılama Modeli Eşik Değeri
+DET_CONF_THRESHOLD = 0.45
+
+# Maksimum hedef alan oranı (kare alanına göre oran)
+# Bu orandan daha büyük alan kaplayan hedefler takibe alınmaz.
+MAX_TARGET_AREA_RATIO = 0.05
+
+# Kilitlenme Dörtgeni Sınır Oranları ( Acquisition / Lock Zone )
+LOCK_ROI_Y_BORDER = 0.10  # Üstten ve alttan bırakılacak boşluk oranı (%10)
+LOCK_ROI_X_BORDER = 0.25  # Sağdan ve soldan bırakılacak boşluk oranı (%25)
+
 # Döngü süresi (saniye)
 DETECT_DURATION = 1.0   # RF-DETR ile tespit fazi suresi
 TRACK_DURATION  = 4.0   # TCTrack takip fazi suresi
-
-# Tespit fazında bbox toplayıp ortalamasını almak için min kare sayısı
-MIN_DET_FRAMES  = 2
 
 # TCTrack erken cikis esigi
 TRACKER_LOST_SCORE = 0.20
 
 # ─── Renkler (BGR) ───────────────────────────────────────────────────────────
-COL_DETR    = (0, 220, 90)    # yeşil  – tespit kutusu
-COL_TRACK   = (0, 140, 255)   # turuncu – takip kutusu
-COL_LOST    = (0, 0, 220)     # kırmızı – kayıp
-COL_TEXT    = (255, 255, 255)
-COL_BG      = (20, 20, 20)
-COL_TIMER   = (0, 255, 220)   # timer çubuğu rengi
+COL_DETR      = (0, 220, 90)    # yeşil  – tespit kutusu
+COL_TRACK     = (0, 140, 255)   # turuncu – takip kutusu
+COL_LOST      = (0, 0, 220)     # kırmızı – kayıp
+COL_TEXT      = (255, 255, 255)
+COL_BG        = (20, 20, 20)
+COL_TIMER     = (0, 255, 220)   # timer çubuğu rengi
+COL_LOCK_ZONE = (0, 255, 255)   # sarı – kilitlenme alanı
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -192,21 +201,42 @@ def run_detr(
     """RF-DETR ile tam frame inference + NMS. (xyxy, confs, class_ids) döner."""
     h, w = frame.shape[:2]
     outputs = inferencer.infer(frame)
-    xyxy, confs, class_ids = decode_outputs(outputs, h, w, CONF_THRESHOLD)
+    xyxy, confs, class_ids = decode_outputs(outputs, h, w, DET_CONF_THRESHOLD)
     if len(xyxy) == 0:
         return (
             np.empty((0, 4), dtype=np.float32),
             np.empty(0, dtype=np.float32),
             np.empty(0, dtype=np.int32),
         )
-    keep = apply_nms(xyxy, confs, class_ids, CONF_THRESHOLD * 0.5, NMS_IOU_THRESHOLD)
+    keep = apply_nms(xyxy, confs, class_ids, DET_CONF_THRESHOLD * 0.5, NMS_IOU_THRESHOLD)
     if len(keep) == 0:
         return (
             np.empty((0, 4), dtype=np.float32),
             np.empty(0, dtype=np.float32),
             np.empty(0, dtype=np.int32),
         )
-    return xyxy[keep], confs[keep], class_ids[keep]
+    
+    # Alanı çok büyük olan hedefleri filtrele
+    valid_xyxy = xyxy[keep]
+    valid_confs = confs[keep]
+    valid_class_ids = class_ids[keep]
+
+    filtered_indices = []
+    total_area = h * w
+    for idx, box in enumerate(valid_xyxy):
+        bw = box[2] - box[0]
+        bh = box[3] - box[1]
+        area = bw * bh
+        if area / total_area <= MAX_TARGET_AREA_RATIO:
+            filtered_indices.append(idx)
+
+    if len(filtered_indices) == 0:
+        return (
+            np.empty((0, 4), dtype=np.float32),
+            np.empty(0, dtype=np.float32),
+            np.empty(0, dtype=np.int32),
+        )
+    return valid_xyxy[filtered_indices], valid_confs[filtered_indices], valid_class_ids[filtered_indices]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -252,12 +282,6 @@ def main() -> None:
     phase_start = time.perf_counter()  # mevcut fazın başlama anı
     in_track    = False                # False → TESPIT, True → TAKIP
 
-    # Tespit fazında bbox toplayıcı
-    # Her frame'de en yüksek güvenilirlikli bbox'ı biriktiririz.
-    det_boxes:  list[np.ndarray] = []  # her frame'deki en iyi xyxy
-    det_confs:  list[float]      = []
-    det_cls:    list[int]        = []
-
     # Takip fazında son bilinen bbox
     track_xyxy: Optional[np.ndarray] = None
     track_lost  = False
@@ -300,45 +324,43 @@ def main() -> None:
                     put_text_bg(frame, lbl, (x1, y2 + 14), scale=0.45,
                                 fg=COL_DETR, bg=COL_BG)
 
-                # En yüksek güvenilirlikli tespiti biriktir
-                if len(confs) > 0:
-                    best_i = int(np.argmax(confs))
-                    det_boxes.append(xyxy[best_i].copy())
-                    det_confs.append(float(confs[best_i]))
-                    det_cls.append(int(class_ids[best_i]))
+                # Tespit yapıldığı an TCTrack'e geç (Sadece kilitlenme dörtgeni içindeki hedefler için)
+                lx1 = LOCK_ROI_X_BORDER * w
+                ly1 = LOCK_ROI_Y_BORDER * h
+                lx2 = (1.0 - LOCK_ROI_X_BORDER) * w
+                ly2 = (1.0 - LOCK_ROI_Y_BORDER) * h
 
-                draw_timer_bar(frame, elapsed, DETECT_DURATION, "TESPIT", COL_DETR)
+                valid_detections = []
+                for box, conf, cid in zip(xyxy, confs, class_ids):
+                    cx = (box[0] + box[2]) / 2.0
+                    cy = (box[1] + box[3]) / 2.0
+                    if lx1 <= cx <= lx2 and ly1 <= cy <= ly2:
+                        valid_detections.append((box, conf, cid))
 
-                # Süre doldu → takip fazına geç
-                if elapsed >= DETECT_DURATION:
-                    phase_done = True
-                    if len(det_boxes) >= MIN_DET_FRAMES:
-                        # En yüksek conf'a sahip frame'in bbox'ını kullan
-                        best_frame = int(np.argmax(det_confs))
-                        init_box   = det_boxes[best_frame]
-                        init_cls   = det_cls[best_frame]
-                        init_xywh  = xywh_from_xyxy(init_box)
+                if len(valid_detections) > 0:
+                    best_i = int(np.argmax([d[1] for d in valid_detections]))
+                    init_box, best_conf, init_cls = valid_detections[best_i]
+                    init_xywh = xywh_from_xyxy(init_box)
 
-                        tracker.init(frame, init_xywh)
-                        in_track    = True
-                        track_lost  = False
-                        track_xyxy  = init_box.copy()
+                    tracker.init(frame, init_xywh)
+                    in_track    = True
+                    track_lost  = False
+                    track_xyxy  = init_box.copy()
 
-                        cls_name = CLASS_NAMES.get(init_cls, str(init_cls))
-                        print(
-                            f"[INFO] TAKIP fazina gecildi — "
-                            f"{cls_name} conf={det_confs[best_frame]:.2f} "
-                            f"bbox={init_xywh}"
-                        )
-                    else:
-                        # Yeterli tespit yoksa tespit fazını yenile
-                        print(f"[WARN] Yeterli tespit toplanamadi ({len(det_boxes)} kare). "
-                              f"Tespit fazi yenilendi.")
-                        in_track = False
-
-                    # Tampon temizle + zamanlayıcıyı sıfırla
-                    det_boxes.clear(); det_confs.clear(); det_cls.clear()
+                    cls_name = CLASS_NAMES.get(int(init_cls), str(init_cls))
+                    print(
+                        f"[INFO] TAKIP fazina gecildi — "
+                        f"{cls_name} conf={best_conf:.2f} "
+                        f"bbox={init_xywh}"
+                    )
+                    # Zamanlayıcıyı sıfırla
                     phase_start = time.perf_counter()
+                else:
+                    draw_timer_bar(frame, elapsed, DETECT_DURATION, "TESPIT", COL_DETR)
+                    # Süre dolduysa ve hala tespit yoksa, zamanlayıcıyı yenile
+                    if elapsed >= DETECT_DURATION:
+                        print(f"[WARN] Yeterli tespit toplanamadi (0 kare). Tespit fazi yenilendi.")
+                        phase_start = time.perf_counter()
 
             # ═════════════════════════════════════════════════════════════════
             # TAKIP FAZI
@@ -351,6 +373,13 @@ def main() -> None:
                 tc_xyxy  = xyxy_from_tc(tc_out["bbox"])
 
                 track_lost = tc_score < TRACKER_LOST_SCORE
+
+                # Eğer takip kutusunun alanı çok büyürse hedef kaybolmuş sayılabilir
+                if not track_lost:
+                    bw = tc_xyxy[2] - tc_xyxy[0]
+                    bh = tc_xyxy[3] - tc_xyxy[1]
+                    if (bw * bh) / (h * w) > MAX_TARGET_AREA_RATIO:
+                        track_lost = True
 
                 if not track_lost:
                     track_xyxy = tc_xyxy.copy()
@@ -382,11 +411,18 @@ def main() -> None:
                     in_track    = False
                     track_xyxy  = None
                     track_lost  = False
-                    det_boxes.clear(); det_confs.clear(); det_cls.clear()
                     phase_start = time.perf_counter()
 
             # ── HUD ──────────────────────────────────────────────────────────
             draw_hud(frame, fps, phase, len(xyxy))
+
+            # Kilitlenme Dörtgeni Çizimi (Lock-on acquisition gate)
+            lx1 = int(LOCK_ROI_X_BORDER * w)
+            ly1 = int(LOCK_ROI_Y_BORDER * h)
+            lx2 = int((1.0 - LOCK_ROI_X_BORDER) * w)
+            ly2 = int((1.0 - LOCK_ROI_Y_BORDER) * h)
+            cv2.rectangle(frame, (lx1, ly1), (lx2, ly2), COL_LOCK_ZONE, 2)
+            put_text_bg(frame, "KILIT ALANI", (lx1 + 8, ly1 + 22), scale=0.55, fg=COL_LOCK_ZONE)
 
             # ── Video kayıt ───────────────────────────────────────────────────
             if video_writer is None:
@@ -415,7 +451,6 @@ def main() -> None:
                 in_track    = False
                 track_xyxy  = None
                 track_lost  = False
-                det_boxes.clear(); det_confs.clear(); det_cls.clear()
                 phase_start = time.perf_counter()
 
     finally:

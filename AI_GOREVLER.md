@@ -90,6 +90,25 @@ Efsane: `[x]` tamamlandı · `[~]` kısmen/devam ediyor · `[ ]` bekliyor
       kaldırıldı. Sentetik ölçüm: tek hedef TAKİP güncellemesi ~240 FPS
       (stride öncesi). pycuda ayrıca numpy 2 ile yeniden derlendi
       (`--no-build-isolation`; eski pip izole ortamda numpy 1.x kullanıyordu).
+- [x] **GPS→görsel servo YUMUŞAK DEVİR (birleşik test)** (2026-07-10,
+      `tests/python/test_rfdetr_route_handover.py`): `test_route_intercept.py`
+      (telemetri/GPS rota güdümü) ile `test_rfdetr_trt_visual_servo.py`
+      (kamera kilit+servo) birleştirildi. `HandoverManager` durum makinesi:
+      GPS_PURSUIT (rota güdümüyle yaklaş) → mesafe < `VISION_ENABLE_CM` (120 m)
+      kamera boru hattı çalışır → mesafe < `HANDOVER_CM` (80 m) + kararlı kilit
+      (`LOCK_STABLE_S` debounce) → HANDOVER (smoothstep ile `HANDOVER_TIME_S`
+      boyunca komut vektörleri harmanlanır) → VISUAL_SERVO. Kilit `RELOCK_GRACE_S`
+      histerezisiyle korunur (mod titreşimi giderildi). Kilit+servo çekirdeği
+      yeni `src/python/vision/visual_servo.py` modülüne çıkarıldı (ServoConfig +
+      LockOnManager + VisualServoController, CUDA'sız); hem görsel servo testi
+      hem birleşik test buradan çeker. Canlı modda kamera boru hattı ayrı
+      thread'de (`VisionWorker`), 50 Hz kontrol döngüsü telemetriyle GPS güdümü
+      koşup blend eder. `--sim` modu donanımsız (sentetik kamera projeksiyonu):
+      **doğrulandı** — 90 s koşuda 2 temiz mod geçişi (16.6 s→handover,
+      21.9 s→servo), servo fazı piksel hata x_RMS ~60 px (hedef ortalı),
+      yaw komut değişimi 0.0024/adım (yumuşak), en yakın 7.7 m.
+      Rapor: `tests/python/outputs/route_handover_sim.png`. Canlı doğrulama
+      simülatör + TRT engine ile bekliyor.
 
 ### GCS / Arayüz
 - [x] Web tabanlı yer kontrol istasyonu: `server.js` TCP↔WebSocket köprüsü,

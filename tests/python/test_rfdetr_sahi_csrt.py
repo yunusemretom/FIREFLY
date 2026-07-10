@@ -72,7 +72,7 @@ from rfdetr.assets.coco_classes import COCO_CLASSES    # noqa: E402
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Giris / Model ─────────────────────────────────────────────────────────────
-VIDEO_PATH      = "/home/tom/2026-07-10 00-12-13.mkv"
+VIDEO_PATH      = "tests/python/outputs/fast_csrt_output.mp4"
 MODEL_WEIGHTS   = "/home/tom/Downloads/checkpoint_best_regular (09.08.16).pth"
 CONF_THRESHOLD  = 0.7
 TARGET_FRAME_SIZE: tuple[int, int] | None = (640,375)  # Ornek: (1280, 720) (genislik, yukseklik) veya None

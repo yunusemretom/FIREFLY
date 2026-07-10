@@ -54,6 +54,7 @@ Firefly/
 │   │   └── pid_throttle.py         🗂️ Throttle PID
 │   │
 │   ├── vision/                            # Hedef tespiti
+│   │   ├── visual_servo.py         ⭐ ServoConfig + LockOnManager (merkez kilit) + VisualServoController (piksel→stick, CUDA'sız, yeniden kullanılabilir)
 │   │   ├── detector.py             🗂️ RT-DETR dedektör iskeleti
 │   │   ├── tracker.py              🗂️ Görsel takip iskeleti
 │   │   ├── lock_detector.py        🗂️ Kilitlenme tespiti iskeleti
@@ -91,7 +92,8 @@ Firefly/
 │   │   ├── test_route_intercept.py     🧪 Rota takip testi (İNCE harness; modüllerden çeker)
 │   │   ├── test_route_kamikaze.py      🧪 Rota kamikaze taarruz testi (faz-demirli intercept)
 │   │   ├── test_rfdetr_sahi_csrt.py    🧪 RF-DETR SAHI + SORT-CSRT video tracking testi
-│   │   ├── test_rfdetr_trt_visual_servo.py 🧪 TRT+SAHI+CSRT ekran testi: merkez kilitlenme dörtgeni + G tuşuyla görsel servolama (drone_sdk)
+│   │   ├── test_rfdetr_trt_visual_servo.py 🧪 TRT+SAHI+CSRT ekran testi: merkez kilitlenme dörtgeni + G tuşuyla görsel servolama (drone_sdk). Kilit/servo çekirdeği vision/visual_servo.py'den çekilir.
+│   │   ├── test_rfdetr_route_handover.py 🧪 BİRLEŞİK: rota-intercept (GPS) ile yaklaş → yakında kamera kilidiyle görsel servoya YUMUŞAK devir. --sim (donanımsız) + canlı mod.
 │   │   ├── test_rfdetr_tctrack.py      🧪 RF-DETR + TCTrack otomatik faz dongusu testi
 │   │   ├── route_viz.py                🔧 Ortak test görselleştirme (tema+pano+elips sim hedefi)
 │   │   ├── test_pursuit_smoothing.py   🧪 Canlı-koşul emülasyon harness (A/B/C)

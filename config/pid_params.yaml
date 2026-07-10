@@ -23,7 +23,7 @@ thresholds:
   seyir_fallback_dist: 500.0
 
 inner_pid:
-  pitch: {kp: 0.045, ki: 0.0, kd: 0.005}
+  pitch: {kp: 0.065, ki: 0.0, kd: 0.005}
   roll: {kp: 0.035, ki: 0.0, kd: 0.002}
   # kd: PID fallback, kd_gyro: gyro damping, int_limit: windup sınırı (deg·s)
   # kp/kd_gyro = 8.75 — pursuit v2'de kanıtlanan P:D oranı (0.002 yetersiz
@@ -66,7 +66,7 @@ pursuit:
 # --- Rota tabanlı takip (tests/python/test_route_intercept.py canlı takipçi) ---
 route_intercept:
   lock_stable_laps: 4          # bu kadar tur üst üste kilitlendikten sonra rota dondurulur
-  follow_distance_cm: 2000.0    # hedefin bu kadar (cm) arkasındaki takip yuvası izlenir
+  follow_distance_cm: 1000.0    # hedefin bu kadar (cm) arkasındaki takip yuvası izlenir
   lookahead_phi: 0.25          # halka üstünde carrot'un dronun önündeki fazı (rad)
   cross_track_band_cm: 2000.0  # elipse çekme bandı (cm)
   nominal_target_speed_cms: 1700.0  # Talon seyir hızı varsayımı
@@ -75,7 +75,7 @@ route_intercept:
   # ~40 m, hedefe 15 cm'e kadar tehlikeli yaklaşma). catch_damp kapanma
   # hızını söndürür, arc_tau kısaltılarak faz gecikmesi azaltıldı.
   catch_gain: 0.5              # yuvaya yay farkı (cm) -> ek hız (cm/s)
-  catch_damp: 1.5              # yay farkı türevi sönümlemesi (boyutsuz)
+  catch_damp: 1.2              # yay farkı türevi sönümlemesi (boyutsuz)
                                # [1.2→1.5: fren tavanı 12° olunca daha erken
                                # hız kesme gerekir — sert pitch freni yerine]
   slot_approach_accel_cms2: 250.0  # sqrt yaklaşma profili: 12° fren yatışının
