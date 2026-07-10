@@ -7,6 +7,7 @@
 | [ekf_rehberi.md](ekf_rehberi.md) | EKF Hedef Filtresi | Durum vektörü, spike reddi, dropout tespiti, config parametreleri |
 | [pursuit_rehberi.md](pursuit_rehberi.md) | Pursuit Güdüm | Takip noktası, imzalı mesafe, dış PID, spin önleme |
 | [route_kamikaze_rehberi.md](route_kamikaze_rehberi.md) | Route Kamikaze Taarruz | Elips rota fit, faz-demirli intercept, PLL, commit/terminal, A'dan Z'ye |
+| [combined_tracker_intercept_rehberi.md](combined_tracker_intercept_rehberi.md) | Combined Interceptor | Yapay zeka takibi (TCTrack, RF-DETR, YOLOv8) ve rota yakalama entegrasyonu |
 | [sim_bridge_ekf_rehberi.md](sim_bridge_ekf_rehberi.md) | Test Bridge'leri | Konum öncelik sırası, agresif kovalama vs hassas takip |
 | [pid_ve_sim_bridge_rehberi.md](pid_ve_sim_bridge_rehberi.md) | PID Guidance | pid_core, pid_pitch, pid_yaw, pid_throttle, sim_bridge |
 | [gcs_server_kullanim_kilavuzu.md](gcs_server_kullanim_kilavuzu.md) | GCS Web Sunucu | Tarayıcı tabanlı yer kontrol istasyonu |
