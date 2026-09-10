@@ -1,214 +1,151 @@
-# 🔥 Firefly — Drone of War Kamikaze AI
+# Firefly
 
-**Teknofest "Drone of War" yarışması** için geliştirilmiş otonom kamikaze drone kontrol sistemi. Unreal Engine tabanlı simülatöre TCP üzerinden bağlanarak, PID kontrol algoritması ile hedefe otomatik kilitlenme ve saldırı gerçekleştirir.
+Autonomous pursuit controller for a kamikaze drone: it connects to an Unreal
+Engine simulator over TCP, estimates a maneuvering aerial target's state with an
+extended Kalman filter, and holds a trailing intercept position with cascaded
+PID control.
 
----
+Built for the TEKNOFEST "Drone of War" competition.
 
-## 📋 İçindekiler
+![demo](docs/demo.gif)
 
-- [Genel Bakış](#genel-bakış)
-- [Mimari](#mimari)
-- [Kurulum](#kurulum)
-- [Kullanım](#kullanım)
-- [Kontrol Modları](#kontrol-modları)
-- [SDK API Referansı](#sdk-api-referansı)
-- [Proje Yapısı](#proje-yapısı)
+## Tech stack
 
----
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![NumPy](https://img.shields.io/badge/NumPy-EKF-013243?logo=numpy&logoColor=white)
+![Tkinter](https://img.shields.io/badge/Tkinter-GCS-FFD43B)
+![OpenCV](https://img.shields.io/badge/OpenCV-Vision-5C3EE8?logo=opencv&logoColor=white)
+![Unreal Engine](https://img.shields.io/badge/Unreal_Engine-Simulator-0E1128?logo=unrealengine&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-blue)
 
-## 🎯 Genel Bakış
+## Quick start
 
-Firefly, hareketli bir hava hedefini otonom olarak takip edip vurmak için tasarlanmış bir yapay zeka kontrol sistemidir. Sistem iki ana bileşenden oluşur:
-
-- **Drone SDK** — Unreal Engine simülatörü ile TCP soket iletişimi
-- **Drone GUI** — Tkinter tabanlı yer kontrol istasyonu ve otonom mod yönetimi
-
-### Temel Özellikler
-
-| Özellik | Açıklama |
-|---|---|
-| 🎮 Manuel Kontrol | Throttle, Pitch, Roll, Yaw slider kontrolleri |
-| 🤖 Kamikaze Modu | PID tabanlı otonom hedef takip ve saldırı |
-| 📡 Canlı Telemetri | Konum, rotasyon, hız, irtifa bilgileri |
-| 🔗 TCP İletişim | `localhost:12345` üzerinden Unreal Engine bağlantısı |
-| ⚡ 50ms Kontrol Döngüsü | 20Hz güncelleme frekansı |
-
----
-
-## 🏗️ Mimari
-
-```
-┌─────────────────────┐     TCP (12345)     ┌──────────────────────┐
-│   Drone GUI (Python) │◄──────────────────►│ Unreal Engine Sim    │
-│                       │                    │ (DronesOfWar.exe)    │
-│  ┌─────────────────┐ │  Kontrol Komutları  │                      │
-│  │ Manuel / Otonom  │─┼──────────────────►│  Drone Fizik Motoru  │
-│  │ Kontrol Mantığı  │ │                    │                      │
-│  └─────────────────┘ │  Telemetri Verisi   │                      │
-│  ┌─────────────────┐ │◄──────────────────│  Hedef Sistemi       │
-│  │ Drone SDK       │ │                    │                      │
-│  │ (TCP Client)     │ │                    │                      │
-│  └─────────────────┘ │                    └──────────────────────┘
-└─────────────────────┘
-```
-
----
-
-## 🚀 Kurulum
-
-### Gereksinimler
-
-- **Python 3.8+**
-- **Tkinter** (Python ile birlikte gelir)
-- Ek bir paket kurulumu gerekmez — proje tamamen standart kütüphaneler kullanır.
-
-### Adımlar
+The simulator must be running and listening on `localhost:12345` before you
+start the ground station.
 
 ```bash
-# Repoyu klonla
-git clone https://github.com/<kullanici>/Firefly.git
-cd Firefly
+# 1. Clone
+git clone https://github.com/yunusemretom/FIREFLY.git
+cd FIREFLY
 
-# Simülatörü başlat
-cd "Drones of War Teknofest"
-./DronesOfWar.exe
+# 2. Virtual environment and dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-# GUI'yi çalıştır (yeni terminal)
-cd ..
+# 3. Start the simulator (separate window), then launch the ground station
 python drone_gui.py
 ```
 
----
-
-## 🎮 Kullanım
-
-1. **Simülatörü başlatın** — `Drones of War Teknofest/DronesOfWar.exe`
-2. **GUI'yi çalıştırın** — `python drone_gui.py`
-3. **"INITIALIZE LINK"** butonuna tıklayarak TCP bağlantısı kurun
-4. **"ARM WEAPON SYSTEM"** ile dronu aktif edin
-5. Manuel kontrol veya **"ENABLE KAMIKAZE MODE"** ile otonom mod seçin
-
----
-
-## 🎯 Kontrol Modları
-
-### Manuel Mod
-
-Slider'lar aracılığıyla doğrudan kontrol:
-
-- **THR (Throttle):** 0.0 → 1.0 — Gaz / Yükselme
-- **Pitch:** -1.0 → 1.0 — İleri / Geri eğilme
-- **Roll:** -1.0 → 1.0 — Sağa / Sola yatış
-- **Yaw:** -1.0 → 1.0 — Eksen dönüşü
-- **Max Throttle:** Gaz üst limitini sınırlandırma
-
-### Kamikaze Modu (Otonom)
-
-İki fazlı akıllı saldırı algoritması:
-
-| Faz | Mesafe | Strateji |
-|---|---|---|
-| **Faz 1 — Yakalama** | > 45m | Agresif dalış açısı, maksimum hız |
-| **Faz 2 — Hassas Yaklaşım** | ≤ 45m | Kademeli burun düzeltme, flare manevrası |
-
-**PID Kazançları:**
-- `KP_YAW = 0.07` — Yaw yönelme hassasiyeti
-- `KP_PITCH = 0.035` — Pitch kontrol hassasiyeti
-- `KP_THR = 0.01` — Throttle düzeltme hassasiyeti
-
----
-
-## 📡 SDK API Referansı
-
-### Bağlantı
+Use the SDK directly if you want to script a run instead of flying it from the
+interface:
 
 ```python
 import drone_sdk as drone
 
-drone.connect(host='127.0.0.1', port=12345)  # Simülatöre bağlan
-drone.is_connected()                          # Bağlantı durumu
-drone.disconnect()                            # Bağlantıyı kapat
+drone.connect()                                   # TCP to localhost:12345
+drone.set_control_surfaces(thr, pitch, roll, yaw, True)
+telemetry = drone.get_telemetry()                 # position, rotation, speed
 ```
 
-### Kontrol Fonksiyonları
+Gains and limits are in `config/`. The control loop runs at 20 Hz on a 50 ms
+period.
 
-```python
-drone.set_throttle(0.5)     # Gaz [0.0 - 1.0]
-drone.set_pitch(0.3)        # İleri/Geri [-1.0 - 1.0]
-drone.set_roll(-0.2)        # Sağa/Sola [-1.0 - 1.0]
-drone.set_yaw(0.1)          # Eksen dönüşü [-1.0 - 1.0]
-drone.set_arm(True)         # Dronu aktif et
+## How it works
 
-# Tek paket gönderimi (önerilen)
-drone.set_control_surfaces(throttle, pitch, roll, yaw, arm)
-```
-
-### Telemetri Fonksiyonları
-
-```python
-drone.get_drone_location()   # (X, Y, Z) konum
-drone.get_drone_rotation()   # (Roll, Pitch, Yaw) rotasyon
-drone.get_drone_speed()      # cm/s hız
-drone.get_drone_altitude()   # cm irtifa
-drone.get_target_location()  # (X, Y, Z) hedef konumu
-drone.get_target_speed()     # cm/s hedef hızı
-drone.get_telemetry()        # Tüm veri (dict)
-```
-
-### TCP Protokolü
+Two components: a **drone SDK** that owns the socket and the telemetry parsing,
+and a **ground station** that owns the control loop, the mode logic and the
+operator interface. Guidance, navigation and simulation code sits under
+`src/python/`, grouped by responsibility.
 
 ```
-Gönderme: throttle,pitch,roll,yaw,arm\n
-Alma:     droneX,droneY,droneZ,roll,pitch,yaw,vx,vy,vz,speed,alt,tarX,tarY,tarZ,tarRoll,tarPitch,tarYaw,tarSpeed\n
+comms/       socket, telemetry parsing, data broker
+navigation/  EKF, GNSS filtering, waypoint control
+guidance/    PID core, pursuit controller, mode manager
+vision/      detector, integrated vision pipeline
+simulation/  scenario runner, GNSS jammer, sim bridge
 ```
 
----
+### Estimating where the target will be
 
-## 📁 Proje Yapısı (Monorepo)
+Position measurements arrive noisy and irregular, and the naive approach of
+differencing consecutive positions to get velocity amplifies that noise until
+the derivative term is useless.
+
+`navigation/ekf.py` runs a six-state constant-acceleration filter over position
+and velocity. Three details in it exist because of specific failures:
+
+- **Chi-squared gating.** A measurement whose Mahalanobis distance exceeds
+  `chi2_threshold` is rejected rather than fused. A single bad fix used to snap
+  the estimate hard enough to command a full-authority control spike.
+- **Adaptive measurement covariance.** Consecutive rejections grow `R` by
+  `r_scale_growth`, up to `r_scale_max`, and it decays back by `r_scale_decay`
+  when measurements start agreeing again. Without this the filter would gate out
+  a genuine target maneuver forever, having decided reality was the outlier.
+- **A rejection-streak reset.** After `_reject_reset` consecutive rejections the
+  filter reinitializes from the buffer instead of defending a diverged estimate.
+
+### Not overshooting the target
+
+The pursuit geometry is the same problem a fixed-wing has, in a form where you
+can hover. `guidance/pursuit.py` computes a virtual follow point
+`follow_distance_cm` behind the target along its velocity vector, then regulates
+the **signed** distance to it:
 
 ```
-FIREFLY (Monorepo)
-├── config/                      # Ortak konfigürasyon dosyaları (.yaml)
-│   ├── pid_params.yaml          # PID katsayıları
-│   ├── ekf_params.yaml          # EKF filtre parametreleri
-│   ├── competition_server.yaml  # Yarışma sunucusu bağlantı ayarları
-│   └── crsf_config.yaml         # CRSF alıcı/verici ayarları
-├── docs/                        # Mimari şemaları ve yarışma notları
-│   ├── architecture_diagrams.md # Sistem mimarisi şemaları
-│   ├── competition_notes.md     # Yarışma notları ve kurallar
-│   └── README.md
-├── scripts/                     # Kurulum ve simülasyon/uçuş başlatma betikleri
-│   ├── setup.sh                 # Kurulum betiği
-│   ├── launch_simulation.sh     # Simülasyon başlatma betiği
-│   └── launch_real_flight.sh    # Gerçek uçuş başlatma betiği
-├── src/
-│   ├── python/                  # Python Backend Servisi
-│   │   ├── navigation/          # EKF Sensör Füzyonu & Yol Noktası Kontrolü (ekf.py, waypoint_controller.py, gnss_filter.py)
-│   │   ├── vision/              # RT-DETR Nesne Tespiti & TCT-Track Takibi (detector.py, tracker.py, lock_detector.py)
-│   │   ├── guidance/            # PID Kontrolcüleri & CRSF Paket Üretimi (pid_yaw.py, pid_pitch.py, pid_throttle.py, crsf_sender.py, mode_manager.py)
-│   │   ├── comms/               # Sunucu İletişimi & Telemetri (server_client.py, telemetry_parser.py, data_broker.py)
-│   │   └── simulation/          # Gazebo/ROS2 Entegrasyonu & GNSS Karıştırıcı (gnss_jammer.py, sim_bridge.py, scenario_runner.py)
-│   └── gcs/                     # Node.js/Electron Yer Kontrol İstasyonu (Ground Control Station)
-│       ├── main.js              # Electron Ana Süreci
-│       ├── preload.js           # Electron Önyükleme Süreci
-│       ├── index.js             # Python servisi için socket.io sunucu köprüsü
-│       ├── renderer/            # React UI Bileşenleri (MapView, VideoOverlay, LockIndicator, TelemetryPanel, StatusBar, ServerStatus)
-│       └── assets/              # İkonlar ve Stiller (styles.css)
-├── tests/                       # Tüm modüllerin birim testleri
-│   ├── python/                  # Python birim testleri
-│   └── gcs/                     # Yer Kontrol İstasyonu testleri
-├── .env.example                 # Örnek çevre değişkenleri
-├── .gitignore                   # Git yoksayma dosyası
-├── package.json                 # GCS ve Node.js bağımlılıkları
-├── requirements.txt             # Python backend bağımlılıkları
-├── drone_gui.py                 # (Eski) Tkinter GUI & Kamikaze AI
-├── drone_sdk.py                 # (Eski) TCP İletişim SDK'sı
-└── README.md                    # Bu doküman
+s = (drone_position - follow_point) . target_heading
+
+s > 0  too close, about to overshoot  -> slow down
+s = 0  on station                     -> match target speed
+s < 0  falling behind                 -> speed up
 ```
 
----
+Feeding `-s` into a PID makes zero the correct answer, so the same controller
+handles closing and lagging without a mode switch:
 
-## 📄 Lisans
+```
+target_speed = target_speed + dist_pid.calculate(-s)
+```
 
-Bu proje Teknofest "Drone of War" yarışması kapsamında geliştirilmiştir.
+### The spin bug
 
+This one was not obvious from the math. When the drone sat exactly on station,
+the follow point occasionally landed slightly *behind* it. Yaw was pointed at the
+follow point, so the drone commanded a 180 degree turn, lost the target, and
+spun.
+
+The fix separates the two uses of the geometry: **yaw always points at the
+target, never at the follow point.** Station-keeping is handled purely by
+throttling forward speed and letting the target open the gap on its own. A
+control loop should not need to turn around to correct a distance error.
+
+`SlewLimiter` in `guidance/pid_core.py` caps how fast any command can change per
+second, which stopped the actuator saturation that mode transitions used to
+cause.
+
+## Known limitations
+
+- Simulator only. No flight on real hardware, so aerodynamic and latency effects
+  are unmodeled.
+- PID gains are tuned for the competition airframe in the simulator and do not
+  transfer as-is.
+- The EKF assumes constant acceleration and lags a hard, sustained maneuver.
+- Vision runs as a separate pipeline and is not yet fused into the EKF; the
+  navigation solution is position-measurement driven.
+- Single target. No track association or multi-target logic.
+- The interface is Tkinter, which is adequate for a competition bench but not
+  for field use.
+
+## Roadmap
+
+- Fuse the vision bearing into the EKF measurement model.
+- Replace the fixed process noise with an adaptive or IMM filter so hard
+  maneuvers are tracked without loosening the gate.
+- Port the control loop to a real airframe over MAVLink.
+- Record scenario runs and score them automatically instead of judging by eye.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+Turkish documentation is preserved in [README.tr.md](README.tr.md).
