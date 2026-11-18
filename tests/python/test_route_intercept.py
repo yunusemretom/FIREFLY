@@ -331,6 +331,10 @@ class LiveInterceptRunner:
         OUTLIER_THRESHOLD_CM = 5000.0   # Elipsten bu mesafeden uzak noktalar outlier
         TRAIL_PHI = 0.35                # ~20 derece arkasında kal
         CROSS_TRACK_BAND = 2000.0       # cm — elipse çekme bandı
+        # --- Kesinti/stale-hold dayanıklılığı (rota faz ekstrapolasyonu) ---
+        PHI_CORRECT_GAIN = 0.5          # yeni ölçüm faz kestirimini ne kadar düzeltsin (0-1)
+        MEAS_CHANGE_EPS = 1.0           # cm — bundan az değişim = stale-hold tekrarı (yeni ölçüm değil)
+        STALE_HOLD_FRAMES = 3           # bu kadar döngü aynı değer gelirse hedef "donmuş" sayılır
         master_route = EllipseRouteModel()
         orbit_locked = False
         route_frozen = False          # yakınsama sonrası rotayı dondur (tur 5-6 titremesini önler)
@@ -349,6 +353,9 @@ class LiveInterceptRunner:
         # Son komut hafızası (veri kesildiğinde tutulacak)
         last_yaw_cmd = 0.0
         last_tx, last_ty = None, None
+        last_meas_tx, last_meas_ty = None, None  # son GERÇEK ölçüm (stale-hold gate)
+        target_phi_est = None                    # rota üzerindeki hedef faz kestirimi (dead-reckoning)
+        stale_count = 0                          # ardışık "değişmedi" döngü sayısı (donma tespiti)
 
         t0 = time.time()
         prev_loop_t = t0
@@ -384,51 +391,117 @@ class LiveInterceptRunner:
                     tx, ty = tx_raw, ty_raw
                     last_tx, last_ty = tx, ty
                 else:
-                    # Bozuk veri — son geçerli konumu kullan
+                    # Bozuk/kesintili veri — son geçerli konumu yalnızca YEDEK
+                    # olarak tut. Rota kilitliyse aşağıdaki faz ekstrapolasyonu
+                    # devreye girer ve dron beklemek yerine hedefin muhtemel
+                    # konumunu rota üzerinde takip etmeye devam eder.
                     tx = last_tx if last_tx is not None else tx_raw
                     ty = last_ty if last_ty is not None else ty_raw
 
-                # Yükseklik ortalaması (ani fırlamayı önle)
-                alt_buffer.append(tz)
-                if len(alt_buffer) > ALT_BUFFER_SIZE:
-                    alt_buffer.pop(0)
-                locked_alt = sum(alt_buffer) / len(alt_buffer)
+                # GERÇEKTEN YENİ ÖLÇÜM mü? SDK stale-hold yapar (yeni paket gelmese
+                # de son değeri tutar) → aynı değer tekrar gelir. Bu tekrarları
+                # fite beslemek ve faz kestirimini "düzeltmek" yanlıştır; sadece
+                # konum değiştiğinde yeni ölçüm say. Kesinti = stale-hold ile aynı
+                # muamele görür: yeni ölçüm yok → saf dead-reckoning.
+                new_meas = data_valid and (
+                    last_meas_tx is None or
+                    math.hypot(tx - last_meas_tx, ty - last_meas_ty) > MEAS_CHANGE_EPS
+                )
+                if new_meas:
+                    last_meas_tx, last_meas_ty = tx, ty
+                    stale_count = 0
+                else:
+                    stale_count += 1
 
-                target_x_log.append(tx)
-                target_y_log.append(ty)
+                # Hedef "donmuş" mu? Kesinti (geçersiz veri) VEYA stale-hold
+                # (birkaç döngü boyunca AYNI değer). Donmuşsa hem guide hem
+                # görüntü/mesafe, ham (donmuş) konumu değil rota üzerindeki
+                # KESTİRİLEN konumu takip etmeye devam eder → hedef donmuş görünmez.
+                target_frozen = (not data_valid) or (stale_count >= STALE_HOLD_FRAMES)
+
+                # Yükseklik ortalaması (ani fırlamayı önle) — yalnızca geçerli veri
+                # girsin; kesinti anındaki tz=0 ortalamayı aşağı çekmesin.
+                if data_valid:
+                    alt_buffer.append(tz)
+                    if len(alt_buffer) > ALT_BUFFER_SIZE:
+                        alt_buffer.pop(0)
+                locked_alt = (sum(alt_buffer) / len(alt_buffer)) if alt_buffer else dz
+
                 drone_x_log.append(dx)
                 drone_y_log.append(dy)
 
-                # Yörünge bufferına ekle
-                orbit_buf_t.append(t_now)
-                orbit_buf_x.append(tx)
-                orbit_buf_y.append(ty)
-
-                # İlk fit için RoutePlanner'ı besle
-                self.planner.add_observation(t_now, tx, ty)
+                # Rota fit'ini YALNIZCA gerçekten yeni ölçümle besle. Stale-hold
+                # tekrarlarını veya kesinti anındaki dondurulmuş konumu eklemek,
+                # elips fitini tek bir noktada yoğunlaştırıp bozar (merkez/omega
+                # kayması → guide sıçraması).
+                if new_meas:
+                    target_x_log.append(tx)
+                    target_y_log.append(ty)
+                    orbit_buf_t.append(t_now)
+                    orbit_buf_x.append(tx)
+                    orbit_buf_y.append(ty)
+                    self.planner.add_observation(t_now, tx, ty)
 
                 # Aktif rota: kilitliyse master, değilse planner
                 active_route = master_route if orbit_locked else self.planner.route
 
                 intercept_pt = None
                 guide_x, guide_y = tx, ty  # Varsayılan: ham hedefe git
+                tx_show, ty_show = tx, ty  # görüntü/mesafe için hedef konumu (donunca kestirim)
 
                 if active_route.fitted:
-                    # Hedefin elips üzerindeki faz açısını bul
-                    current_phi = active_route.nearest_phi(tx, ty)
+                    omega = active_route.omega
 
-                    # Faz birikimini izle (360° tespiti)
+                    # --- HEDEF FAZ KESTİRİMİ (rota üzerinde dead-reckoning) ---
+                    # Hedef bilinen rotada sabit omega ile ilerler. Her döngüde
+                    # faz kestirimini omega*dt kadar İLERLET; SADECE gerçekten yeni
+                    # ölçüm geldiğinde ölçülen faza doğru düzelt. Böylece GPS
+                    # kesildiğinde (DROPOUT) veya stale-hold tekrarında dron yerinde
+                    # saymaz — hedefin muhtemel konumunu rota üzerinde tahmin edip
+                    # arkasında (trail) kalır. Ölçüm dönünce kestirim yumuşakça
+                    # gerçek faza kilitlenir (sıçrama yok).
+                    if target_phi_est is not None:
+                        target_phi_est += omega * dt
+                    if new_meas:
+                        meas_phi = active_route.nearest_phi(tx, ty)
+                        if target_phi_est is None:
+                            target_phi_est = meas_phi
+                        else:
+                            dphi = meas_phi - target_phi_est
+                            dphi = (dphi + math.pi) % (2 * math.pi) - math.pi
+                            target_phi_est += PHI_CORRECT_GAIN * dphi
+                    elif target_phi_est is None:
+                        # Henüz hiç yeni ölçüm işlenmedi → mevcut (yedek) konumdan başlat
+                        target_phi_est = active_route.nearest_phi(tx, ty)
+
+                    # Hedefin elips üzerindeki (kestirilen) faz açısı
+                    current_phi = target_phi_est
+
+                    # Hedef donmuşsa (kesinti/stale-hold) görüntü ve mesafe, ham
+                    # donmuş konumu değil rota üzerindeki KESTİRİLEN hedef konumunu
+                    # kullansın → hedef ekranda ilerlemeye devam eder, donuk görünmez.
+                    if target_frozen:
+                        tx_show, ty_show = active_route.point_on_ellipse(target_phi_est)
+
+                    # Faz birikimini izle — NET (işaretli) faz değişimini topla.
+                    # "Tam tur" = başlangıç (reset) açısından itibaren 360°'lik NET
+                    # dönüş demektir. Böylece hedef 180°'de başlasa bile mutlak açının
+                    # 360°'ye gelmesi tur SAYMAZ; yalnızca gerçek bir tam tur sayılır.
+                    # İşaretli toplama ayrıca ölçüm düzeltmesi kaynaklı ileri-geri
+                    # titremeyi sadeleştirir (abs olsaydı gerçek tur dolmadan erken
+                    # tetiklerdi).
                     if last_target_phi is not None:
                         delta = current_phi - last_target_phi
                         if delta > math.pi:
                             delta -= 2 * math.pi
                         elif delta < -math.pi:
                             delta += 2 * math.pi
-                        phase_acc += abs(delta)
+                        phase_acc += delta
                     last_target_phi = current_phi
 
-                    # 360° (2π) tamamlandı mı?
-                    if phase_acc >= 2 * math.pi and len(orbit_buf_t) >= 15:
+                    # Başlangıç açısından itibaren NET 360° (2π) tamamlandı mı?
+                    # (yön farketmez → CW için negatif, CCW için pozitif birikir)
+                    if abs(phase_acc) >= 2 * math.pi and len(orbit_buf_t) >= 15:
                         # Rota donmadıysa yeniden fit dene; donduysa yalnızca
                         # buffer/faz sıfırlanır. Her turda kör re-fit yapmak elips
                         # parametrelerini oynatıp guide noktasını basamaklı
@@ -461,27 +534,47 @@ class LiveInterceptRunner:
                                     orbit_locked = True
                                     active_route = master_route
                                     orbit_count += 1
-                                    if orbit_count >= LOCK_STABLE_LAPS:
-                                        route_frozen = True
-                                    print(f"  ★ Yörünge kilitlendi! (tur #{orbit_count}, "
+                                    print(f"  ★ Yörünge kilitlendi/güncellendi! (tur #{orbit_count}, "
                                           f"{len(orbit_buf_t)} nokta, "
-                                          f"periyot≈{master_route.period:.1f}s"
-                                          f"{' — DONDU' if route_frozen else ''})")
+                                          f"periyot≈{master_route.period:.1f}s)")
                                 else:
-                                    print("  ⚠ Yeni fit reddedildi (yön/merkez "
-                                          "tutarsız) — önceki kilit korunuyor.")
+                                    # Reddedilen aday, mevcut kilidin ZATEN kararlı
+                                    # olduğunu gösterir → bunu da kararlı tur SAY.
+                                    # Aksi halde orbit_count hiç artmaz, route_frozen
+                                    # asla True olmaz ve her tur yeniden fit denenip
+                                    # reddedilir (sonsuz "reddedildi" spam'i + rota
+                                    # asla donmaz). Master kendi çerçevesinde
+                                    # iç-tutarlı olduğu için trail/ekstrapolasyon
+                                    # geometrik olarak doğru kalır.
+                                    orbit_count += 1
+                                    print(f"  ⚠ Yeni fit reddedildi (yön/merkez tutarsız) "
+                                          f"— mevcut kilit korunuyor (kararlı tur #{orbit_count}).")
+
+                                # Kilit yeterince tur boyunca dayandıysa (kabul VEYA
+                                # tutarlı-red) rotayı dondur → yeniden fit ve spam durur.
+                                if orbit_locked and orbit_count >= LOCK_STABLE_LAPS and not route_frozen:
+                                    route_frozen = True
+                                    active_route = master_route
+                                    print(f"  ✓ Rota DONDURULDU — kilit kararlı, yeniden "
+                                          f"fit durduruldu (periyot≈{master_route.period:.1f}s).")
                             except ValueError as e:
                                 print(f"  ✗ Robust fit başarısız: {e}")
 
-                        # Sonraki tur için sıfırla (donmuş olsa da buffer büyümesin)
+                        # Sonraki tur için sıfırla (donmuş olsa da buffer büyümesin).
+                        # Yeni fit kabul edildiyse elips çerçevesi (theta/phi0)
+                        # değişmiş olabilir → faz kestirimini yeni çerçevede
+                        # mevcut konumdan yeniden türet (eski frame'e ait phi geçersiz).
                         phase_acc = 0.0
                         orbit_buf_t.clear()
                         orbit_buf_x.clear()
                         orbit_buf_y.clear()
-                        last_target_phi = active_route.nearest_phi(tx, ty)
+                        target_phi_est = active_route.nearest_phi(tx, ty)
+                        last_target_phi = target_phi_est
 
                     # --- ELİPS ÜZERİNDE TAKİP ---
-                    target_phi = active_route.nearest_phi(tx, ty)
+                    # Kestirilen faz kullanılır (dropout/stale-hold'da ilerlemeye
+                    # devam eder), ham nearest_phi değil.
+                    target_phi = target_phi_est
                     trail_phi = target_phi - np.sign(active_route.omega) * TRAIL_PHI
                     guide_x, guide_y = active_route.point_on_ellipse(trail_phi)
 
@@ -504,7 +597,7 @@ class LiveInterceptRunner:
                     line_fitted_ellipse.set_data(ex, ey)
 
                 t_hist.append(t_now)
-                dist_log.append(math.hypot(tx - dx, ty - dy))
+                dist_log.append(math.hypot(tx_show - dx, ty_show - dy))
                 res_log.append(self.planner.last_residual if self.planner.last_residual is not None else 0.0)
 
                 # ====================================================================
@@ -547,8 +640,12 @@ class LiveInterceptRunner:
                 self._yaw_smooth = 0.5 * self._yaw_smooth + 0.5 * final_yaw
                 final_yaw = self._yaw_smooth
 
-                # Veri geçersizse son yaw komutunda kal
-                if not data_valid:
+                # Veri geçersiz OLSA BİLE, rota kilitliyken faz kestirimi guide
+                # noktasını rota üzerinde ilerletir → yaw'ı DONDURMA, hareketli
+                # guide'a doğru dönmeye devam et (dron artık yerinde saymaz).
+                # Yalnızca hiç kestirim yoksa (rota daha fit edilmedi) son komutta kal.
+                have_estimate = active_route.fitted and target_phi_est is not None
+                if not data_valid and not have_estimate:
                     final_yaw = last_yaw_cmd
                 else:
                     last_yaw_cmd = final_yaw
@@ -612,7 +709,7 @@ class LiveInterceptRunner:
                 if step % 5 == 0 and target_x_log:
                     line_target_path.set_data(target_x_log, target_y_log)
                     line_drone_path.set_data(drone_x_log, drone_y_log)
-                    point_target.set_data([tx], [ty])
+                    point_target.set_data([tx_show], [ty_show])
                     point_drone.set_data([dx], [dy])
 
                     if intercept_pt is not None:

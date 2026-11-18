@@ -6,7 +6,7 @@ flight:
   takip_speed_margin: 500.0     # TAKIP'te hedefe göre fazla hız (yaklaşma marjı)
 
 limits:
-  min_pitch: -60.0
+  min_pitch: -20.0
   max_pitch: 20.0
   min_throttle: -1.0
   max_throttle: 0.8
@@ -17,8 +17,8 @@ thresholds:
   seyir_fallback_dist: 100.0
 
 inner_pid:
-  pitch: {kp: 0.0045, ki: 0.0, kd: 0.005}
-  roll: {kp: 0.035, ki: 0.0, kd: 0.002}
+  pitch: {kp: 0.045, ki: 0.0, kd: 0.0005}
+  roll: {kp: 0.035, ki: 0.0, kd: 0.0002}
   yaw: {kp: 0.035, ki: 0.0005, kd: 0.002}
 
 outer_pid:
@@ -30,7 +30,7 @@ slew:
 
 # --- 5-metre arkadan takip güdümü ---
 pursuit:
-  follow_distance_cm: 500.0  # hedefin kaç cm arkasında kal (5 m)
+  follow_distance_cm: 2500.0  # hedefin kaç cm arkasında kal (5 m)
 
   # Dış döngü PID: imzalı mesafe hatası (cm) → hız düzeltmesi
   #   100 cm geride → +15 cm/s, 500 cm → +75 cm/s, 2000 cm → +300 cm/s
@@ -43,7 +43,7 @@ pursuit:
   # Sqrt hız profili — hem yaklaşma hem geçiş simetrik sınırlanır
   #   v_safe = sqrt(2 * approach_accel * |s|)
   #   150 cm/s²  →  500 cm'de 387 cm/s, 2000 cm'de 775 cm/s kapanma limiti
-  approach_accel_cms2: 900.00
+  approach_accel_cms2: 200.00
 
   min_speed_cms: 100.0
   max_speed_cms: 2800.0
