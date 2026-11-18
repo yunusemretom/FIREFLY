@@ -3,7 +3,7 @@
   YAPAY ZEKA ARAÇLARI İÇİN NOT (AI ASSISTANT DIRECTIVE)
   Bu dosya, Firefly kod tabanının OTORİTE dosya haritasıdır. Kod tabanını
   baştan taramak yerine burayı oku. Kodu değiştirdiğinde bu haritayı güncelle.
-  Kardeş dosyalar: AI_PROJE_OZETI.md, AI_GOREVLER.md   |   Güncel: 2026-07-04
+  Kardeş dosyalar: AI_PROJE_OZETI.md, AI_GOREVLER.md   |   Güncel: 2026-11-18
 ================================================================================
 -->
 
@@ -18,7 +18,7 @@ Firefly/
 ├── AI_DOSYA_YAPISI.md         ⭐ Bu dosya
 ├── AI_GOREVLER.md             ⭐ Görev listesi (yapılan/yapılacak)
 │
-├── drone_sdk.py               ⭐ TCP SDK — simülatör iletişimi (parse+kontrol)
+├── drone_sdk.py               ⭐ TCP SDK — simülatör iletişimi (komutlar `\n\0` ile biter, bkz. docs/simulator_ve_ortam.md)
 ├── drone_gui.py               ⚠️ Eski Tkinter kontrol paneli + Excel veri toplama
 ├── README.md                  ⚠️ Kısmen eski (silinmiş modüllere atıf var)
 ├── implementation_plan.md     📄 İlk monorepo kurulum planı (tarihsel)
@@ -40,9 +40,15 @@ Firefly/
 │   │   ├── route_intercept_system.py ⭐ Elips rota fit + RoutePlanner + intercept
 │   │   ├── ekf.py                  ⭐ Config-driven CTRV EKF (5 durum, analitik Jacobian)
 │   │   ├── ekf_deneme.py           🧪 EKF deneme/geliştirme sürümü
-│   │   └── simulate_1hz_test.py    🧪 1 Hz koşulu: UKF vs CV Kalman kıyası
+│   │   ├── simulate_1hz_test.py    🧪 1 Hz koşulu: UKF vs CV Kalman kıyası
+│   │   ├── gps_target_estimator.py ⭐ YARIŞMA MODU hedef kestirici (sadece konum; koordineli
+│   │   │                              dönüş modeli, robust GN, sıçrama için segment offset)
+│   │   ├── hunter_state.py         ⭐ Avcı hız vektörü KF (komut modeli + GPS + yer hızı)
+│   │   └── talon_estimator.py      ⚠️ ESKİ: hedef rotation kanalına dayanır (yarışmada YOK)
 │   │
 │   ├── guidance/                          # Güdüm + kontrol
+│   │   ├── follow_controller.py    ⭐ İz takibi (hız feed-forward, fren profilli kapanma,
+│   │   │                              DOLANMA/KAÇINMA, dron modeli + throttle ters haritası)
 │   │   ├── pursuit_guidance.py     ⭐ v2: Gate + LeadSmoother + YawController
 │   │   ├── mode_manager.py         🗂️ Uçuş modu geçiş mantığı (iskelet)
 │   │   ├── pid_core.py             ⭐ Genel PID çekirdeği
@@ -51,6 +57,10 @@ Firefly/
 │   │   └── pid_throttle.py         🗂️ Throttle PID
 │   │
 │   ├── vision/                            # Hedef tespiti
+│   │   ├── talon_detector.py       ⭐ RF-DETR ONNX, ROI tespiti, GPU (CUDA 12 preload)
+│   │   ├── camera_model.py         ⭐ FPV kamera modeli (FOV 125°, 25° yukarı)
+│   │   ├── window_capture.py       ⭐ Oyun penceresini X11 ile yakalama
+│   │   ├── vision_fusion.py        🧪 Kamera ışınından GPS offset kestirimi (bağlı değil)
 │   │   ├── detector.py             🗂️ RT-DETR dedektör iskeleti
 │   │   ├── tracker.py              🗂️ Görsel takip iskeleti
 │   │   ├── lock_detector.py        🗂️ Kilitlenme tespiti iskeleti
@@ -68,6 +78,8 @@ Firefly/
 │   │   └── data_broker.py
 │   │
 │   └── simulation/
+│       ├── follow_runner.py       ⭐ CANLI iz takip koşucusu (varsayılan yarışma modu, --legacy)
+│       ├── competition_telemetry.py ⭐ Şartname filtresi (sadece izinli alanlar/hızlar)
 │       └── sim_bridge.py          🗂️ Simülasyon köprüsü (iskelet)
 │
 ├── src/gcs/                               # YER KONTROL İSTASYONU (Node.js)
@@ -86,12 +98,16 @@ Firefly/
 │   │   ├── test_route_intercept.py     🧪 Rota fit + intercept testi
 │   │   ├── test_pursuit_smoothing.py   🧪 Canlı-koşul emülasyon harness (A/B/C)
 │   │   ├── test_pursuit_live.py        ⭐🧪 Düzeltilmiş CANLI pursuit runner
+│   │   ├── test_follow_offline.py      ⭐🧪 Simülatörsüz kapalı döngü (kayıt + dron modeli)
 │   │   └── pursuit_guidance (1).py     ⚠️ v1 (dalgalı yol) — referans/kıyas
 │   ├── gcs/test_bridge.js              🧪 GCS köprü testi
 │   └── README.md
 │
 ├── docs/                                  # Rehberler (bazıları silinmiş modüllere atıf yapar ⚠️)
 │   ├── README.md                   Doküman indeksi
+│   ├── yarisma_modu_takip.md       ⭐ GPS-only iz takibi: şartname, algoritma, sonuçlar
+│   ├── simulator_ve_ortam.md       ⭐ Sim açma, çökme düzeltmesi, GPU .venv, kamera durumu
+│   ├── images/                     Ekran görüntüleri
 │   ├── ekf_rehberi.md              EKF filtresi rehberi
 │   ├── pursuit_rehberi.md          Pursuit güdüm rehberi
 │   ├── sim_bridge_ekf_rehberi.md   ⚠️ Silinmiş bridge'lere atıf
@@ -100,7 +116,18 @@ Firefly/
 │   ├── architecture_diagrams.md
 │   └── competition_notes.md
 │
+├── analysis/                              # Ölçüm ve analiz betikleri
+│   ├── record_telemetry.py     🔧 Ham telemetri + debug truth kaydı
+│   ├── sysid.py                🔧 Dron sistem tanıma (eğim/hız/throttle)
+│   ├── replay_gps_estimator.py 🔧 GPS-only kestiriciyi kayıtlarda değerlendirme
+│   ├── replay_estimator.py     🔧 Eski (rotation'lı) kestirici değerlendirme
+│   ├── offline_scenarios.py    🔧 Farklı başlangıç geometrileri
+│   └── data/                   🚫 Kayıtlar/kareler/grafikler (git dışı, yüzlerce MB)
+│
+├── object_detection/                      # 🚫 RF-DETR ONNX modeli (git dışı, README.md)
+│
 └── scripts/
+    ├── sim_up.sh               🔧 Simülatörü aç / çökmüşse yeniden başlat
     ├── setup.sh                🔧 Kurulum
     ├── launch_simulation.sh    🔧 Simülasyon başlat
     └── launch_real_flight.sh   🔧 Gerçek uçuş başlat
@@ -119,7 +146,11 @@ Firefly/
 | Config-driven EKF | `src/python/navigation/ekf.py` |
 | PID/uçuş ayarları | `config/pid_params.yaml` |
 | Filtre ayarları | `config/ekf_params.yaml` |
-| Canlı test | `tests/python/test_pursuit_live.py` |
+| Canlı test (eski pursuit) | `tests/python/test_pursuit_live.py` |
+| **Canlı iz takibi (yarışma modu)** | `src/python/simulation/follow_runner.py` |
+| **Yarışma telemetri kuralları** | `src/python/simulation/competition_telemetry.py`, `docs/yarisma_modu_takip.md` |
+| **Hedef kestirimi (yarışma modu)** | `src/python/navigation/gps_target_estimator.py` |
+| Simülatörü açmak / çökme | `scripts/sim_up.sh`, `docs/simulator_ve_ortam.md` |
 | Web GCS köprüsü | `src/gcs/server.js` |
 
 ## Git Bağlamı (2026-07-04 itibarıyla)

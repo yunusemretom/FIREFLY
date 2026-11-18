@@ -126,6 +126,45 @@ Hedef tekrarlayan rota izlediğinden, her ölçümü bağımsız tahmin etmek ye
 - `solve_intercept()` — dronun sabit hızıyla hedefi rota üzerinde en erken
   yakalayacağı zaman/nokta (lead pursuit çözümü).
 
+**Canlı runner dayanıklılığı** (`tests/python/test_route_intercept.py` →
+`LiveInterceptRunner`) — GPS kesintisi/stale-hold'a karşı sertleştirildi:
+- **Faz dead-reckoning:** Rota kilitliyken hedefin elips faz açısı (`target_phi_est`)
+  her döngüde `omega·dt` ile ilerletilir; SADECE gerçekten yeni ölçüm geldiğinde
+  ölçülen faza doğru düzeltilir (`PHI_CORRECT_GAIN`). GPS **kesildiğinde (DROPOUT)**
+  veya stale-hold tekrarında dron **yerinde saymaz** — hedefin muhtemel konumunu rota
+  üzerinde tahmin edip `TRAIL_PHI` (~20°) arkasında kalır. Kestirim varken yaw
+  dondurma da kaldırıldı (hareketli guide'a dönmeye devam eder).
+- **Açık donma tespiti + kestirilen görüntü:** `stale_count` ile birkaç döngü
+  (`STALE_HOLD_FRAMES`) boyunca değişmeyen veri veya kesinti "donmuş"
+  (`target_frozen`) sayılır. Donunca hem mesafe hesabı hem ekrandaki hedef işareti
+  ham (donmuş) konumu değil rota üzerindeki **kestirilen** hedef konumunu
+  (`point_on_ellipse(target_phi_est)`) kullanır → hedef ekranda donuk görünmez,
+  kestirdiği son konuma doğru ilerlemeye devam eder.
+- **Fit yalnızca yeni ölçümle beslenir** (stale/dondurulmuş tekrarlar elips fitini tek
+  noktada yoğunlaştırıp bozmaz); kesintideki `tz=0` irtifa ortalamasına girmez.
+- **Reddetme→dondurma:** Tutarsız (yön/merkez) yeniden-fit reddedildiğinde bu, kilidin
+  zaten kararlı olduğunun kanıtı sayılıp `orbit_count` artırılır → rota
+  `LOCK_STABLE_LAPS` turdan sonra donar; eskiden görülen sonsuz "yeni fit reddedildi"
+  spam'i (sayaç hiç artmadığı için rota hiç donmuyordu) biter.
+- **Net tur tespiti:** Tur sayımı işaretli faz birikimiyle yapılır (`phase_acc += delta`,
+  `abs` değil) → "tam tur" = başlangıç açısından itibaren NET 360°. Hedef 180°'de
+  başlasa bile mutlak açının 360°'ye gelmesi tur saymaz; ölçüm titreşimi de erken
+  tetiklemez.
+
+### 3.5 Yarışma Modu İz Takibi (GPS-only) — 2026-11-18  ⭐ (aktif)
+Şartnameye göre hedeften SADECE enlem/boylam/irtifa/yer hızı (≤5 Hz), avcıdan GPS +
+skaler yer hızı + duruş (3.125–50 Hz) gelir. Hedef `rotation` kanalı ve dron hız vektörü
+YOKTUR (sim gönderiyor ama kullanılamaz). Hat:
+- `simulation/competition_telemetry.py` — sim telemetrisinden sadece izinli alanlar/hızlar.
+- `navigation/gps_target_estimator.py` — koordineli dönüş modeli, 4 s robust Gauss-Newton,
+  sıçramalar için segment offset, ileri tahminde dönüş hızı sönümü. Gecikme D=1.0 s parametre
+  (konumdan gözlemlenemez).
+- `navigation/hunter_state.py` — avcı hız vektörü KF (gönderilen komut + dron modeli + GPS + yer hızı).
+- `guidance/follow_controller.py` — iz takibi (`est.trail(lag)` arayüzü), `simulation/follow_runner.py`
+  varsayılan olarak bu modda çalışır (`--legacy` eski rotation'lı yol).
+- Canlı (100 s): 40 m takip → mesafe 36–45 m, iz hatası medyan 3.5 m; 20 m takip dönüşlerde
+  45–56 m'ye açılır (1 s GPS gecikmesi ≈ iz gecikmesi → ön görüş yok). Ayrıntı: `docs/yarisma_modu_takip.md`.
+
 ### 3.4 CTRV EKF (alternatif) — `navigation/ekf.py`
 Config-driven (`config/ekf_params.yaml → ctrv_ekf`) 5 durumlu EKF
 `[x, y, theta, v, omega]`, analitik Jacobian'lı. Mahalanobis spike reddi,

@@ -54,3 +54,12 @@ Drones of War Teknofest/
 *.cache
 
 Promtlar.md
+# --- Kişisel notlar ---
+promt
+
+# --- Büyük veri / model dosyaları (diskte tutulur, repoya girmez) ---
+# Simülatör kayıtları, kareler, grafikler (yüzlerce MB): analysis/data/
+analysis/data/
+# RF-DETR ONNX modeli (115 MB > GitHub 100 MB sınırı): object_detection/README.md
+object_detection/*.onnx
+object_detection/*.engine

@@ -4,6 +4,8 @@
 
 | Dosya | Konu | İçerik |
 |---|---|---|
+| [yarisma_modu_takip.md](yarisma_modu_takip.md) | **Yarışma Modu İz Takibi** | Şartname telemetrisi, GPS-only kestirici, avcı KF, iz takibi, sonuçlar |
+| [simulator_ve_ortam.md](simulator_ve_ortam.md) | **Simülatör ve Ortam** | sim_up.sh, çökme kök nedeni ve düzeltmesi, GPU .venv, kamera durumu |
 | [ekf_rehberi.md](ekf_rehberi.md) | EKF Hedef Filtresi | Durum vektörü, spike reddi, dropout tespiti, config parametreleri |
 | [pursuit_rehberi.md](pursuit_rehberi.md) | Pursuit Güdüm | Takip noktası, imzalı mesafe, dış PID, spin önleme |
 | [sim_bridge_ekf_rehberi.md](sim_bridge_ekf_rehberi.md) | Test Bridge'leri | Konum öncelik sırası, agresif kovalama vs hassas takip |
@@ -13,6 +15,10 @@
 | [competition_notes.md](competition_notes.md) | Yarışma Notları | Yarışmaya özel kurallar ve gözlemler |
 
 ## Hızlı Başlangıç
+
+> Güncel ana yol (2026-11-18): `scripts/sim_up.sh` ardından
+> `python3 -m src.python.simulation.follow_runner --follow 4000`. Ayrıntı: [yarisma_modu_takip.md](yarisma_modu_takip.md).
+> Aşağıdaki komutlar eski modüllere aittir.
 
 ```bash
 # Agresif kovalama (hedefe maksimum hızda yaklaş):

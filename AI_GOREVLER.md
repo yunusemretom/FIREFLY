@@ -107,3 +107,65 @@ Efsane: `[x]` tamamlandı · `[~]` kısmen/devam ediyor · `[ ]` bekliyor
   (pursuit-guidance-v2, ekf-navigation, project-overview).
 - Bir görevi kapattığında: kutuyu `[x]` yap, tarihi güncelle, gerekirse
   AI_PROJE_OZETI.md'deki ilgili bölümü de düzelt.
+
+---
+
+## 🆕 2026-11-17 — Güdüm yeniden tasarımı (canlı simülatörde doğrulandı)
+
+**Ölçülen simülatör gerçekleri** (`analysis/record_telemetry.py`, `analysis/sysid.py`):
+- Hedef `rotation` kanalı ~100 Hz, **gecikmesiz ve bozulmasız**: yaw = gerçek uçuş yönü
+  (RMS 0.01°), pitch → vz (r=0.99), roll → dönüş hızı (r=0.94). Hedef hızı 1792 ± 23 cm/s.
+- Hedef konum: ~5 Hz, **1.0 s gecikmeli**, sabit offset (2,2,1 m), 40 m sıçrama, kesinti.
+  Hız kanalı kullanılamaz (r=0.01).
+- Dron: eğim = 60°×stick; kararlı hız ≈151 cm/s/°, 3320 cm/s'de doyar; τ≈2 s; yaw 0.5 → ~190°/s.
+- ⚠️ Throttle dokümandaki gibi DEĞİL: 0 → +95 cm/s tırmanış; (-0.5, 0) arası tırmandırır
+  (-0.05 → +950!); alçalma için -0.6…-1 gerekir. Ters harita: `DroneModel.throttle_for_vz`.
+
+**Yeni modüller:**
+- [x] `navigation/talon_estimator.py` — yönelim yol integrali + gecikmeli GPS fit'i
+      (`p = b + V·S(t-D)`), D'yi çevrimiçi kestirir (1.006 s buldu), inovasyon kapısı.
+      Kayıtta hata 21 m → 3 m (kalan = gözlemlenemez offset). Rota ezberleme YOK (6–20 s pencere).
+- [x] `guidance/follow_controller.py` — iz takibi: referans = hedefin d/V s önceki konumu,
+      hız + merkezcil ivme feed-forward, fren profilli kapanma, DOLANMA (önden gelince yandan geç),
+      3B çarpışma önleme, yaw kamerayı hedefe tutar (pitch/roll ile öteleme ayrık).
+- [x] `simulation/follow_runner.py` — tek 50 Hz ana döngü, tek TCP satırı, donma koruması,
+      debug truth ile metrik/grafik (truth kontrole GİRMEZ).
+- [x] `tests/python/test_follow_offline.py` + `analysis/offline_scenarios.py` — kayıt + dron
+      modeliyle simülatörsüz kapalı döngü test.
+- [x] `scripts/sim_up.sh` — simülatörü otomatik aç / çökmüşse yeniden başlat.
+
+**Canlı sonuç (follow7, 93 s, takip 20 m):** mesafe medyan 20.0 m, p5–p95 17.0–22.2 m,
+en yakın 16.3 m (yaklaşma dahil), hedefi geçme 0, yaw hatası medyan 2.8°.
+
+**Açık işler:**
+- [x] `rotation` kanalı yarışmada YOK (şartname) → GPS-only hat ana yol oldu (2026-11-18, aşağıda).
+- [ ] Şartnamedeki takip/kilit tanımına göre takip mesafesi ve irtifa ofseti (kamera 25° yukarı).
+- [ ] Görü (RF-DETR) ile terminal faz / kilit; kameradan offset kestirimi.
+- [x] Simülatör çökmesi — kök neden sim TCP sunucusunda NUL'suz `strlen`; `drone_sdk` komutları `\n\0` ile bitiriyor (2026-11-17).
+
+---
+
+## 🆕 2026-11-18 — Şartnameye uygun yarışma modu + ortam
+
+**Şartname:** hedef = enlem/boylam/irtifa/yer hızı (≤5 Hz); avcı = GPS + yer hızı + duruş
+(3.125–50 Hz). Hedef rotation ve dron hız vektörü verilmiyor → 2026-11-17 kestiricisi geçersiz.
+
+- [x] `simulation/competition_telemetry.py` — şartname filtresi (kontrol yolu sadece buradan okur).
+- [x] `navigation/gps_target_estimator.py` — GPS-only hedef kestirici (segment offset, kesinti sönümü).
+      10 kayıtta iz noktası hatası medyan 3.0 m, p95 8.0 m.
+- [x] `navigation/hunter_state.py` — avcı hız vektörü KF; 3.125 Hz'de de canlı sorunsuz.
+- [x] `follow_runner.py` varsayılan yarışma modu (`--legacy`, `--drone-hz`); `test_follow_offline.py`
+      yarışma modu + `true_hunter` teşhisi.
+- [x] Canlı: 40 m takip → 36–45 m bandı, iz hatası 3.5 m; 20 m dönüşlerde açılıyor.
+- [x] GPU: proje `.venv` + `nvidia-cudnn-cu12`; RF-DETR 290 ms → ~25 ms (`docs/simulator_ve_ortam.md`).
+- [x] Repo düzeni: `analysis/data/` ve `object_detection/*.onnx` git dışı; dokümanlar
+      `docs/yarisma_modu_takip.md`, `docs/simulator_ve_ortam.md`.
+
+**Açık işler:**
+- [ ] LLA → yerel ENU dönüşümü (`CompetitionTelemetry` girişine).
+- [ ] Hedef konum gecikmesi D'nin kalibrasyonu (şu an sabit 1.0 s).
+- [ ] Dedektör menzili: arkadan sadece ~10–15 m; uzak menzil için truth ile otomatik etiketli
+      sim verisiyle ince ayar. HUD "READY" yazısı yanlış alarm üretiyor → HUD maskesi.
+- [ ] Sim bazen bağlantı kapandıktan sonra yeni bağlantı kabul etmiyor.
+- [ ] pytest ortamı: sistemdeki anyio eklentisi pytest'i bozuyor (`-p no:anyio`); `tests/python`
+      dosyaları pytest testi değil, script.
