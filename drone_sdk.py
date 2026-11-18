@@ -175,8 +175,11 @@ class _DroneInternal:
     def send_inputs(self):
         if not self.is_connected: return
         arm_val = 1 if self.arm else 0
-        # Format: throttle,pitch,roll,yaw,arm\n
-        msg = f"{self.throttle:.4f},{self.pitch:.4f},{self.roll:.4f},{self.yaw:.4f},{arm_val}\n"
+        # Format: throttle,pitch,roll,yaw,arm\n\0
+        # Sondaki \0 zorunlu: sim'in TCP sunucusu Recv tamponunu NUL'suz strlen ile
+        # string'e ceviriyor (exe+0x3f29533); NUL olmadan okuma tampon disina tasip
+        # rastgele aralarla ACCESS_VIOLATION ile cokuyor.
+        msg = f"{self.throttle:.4f},{self.pitch:.4f},{self.roll:.4f},{self.yaw:.4f},{arm_val}\n\0"
         try:
             self.sock.sendall(msg.encode('utf-8'))
         except:
